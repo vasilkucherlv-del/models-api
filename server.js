@@ -189,8 +189,8 @@ app.post('/api/import-feed', async (req, res) => {
     for (const p of products) {
       for (const m of p.models) {
         const mn = norm(m.model);
-        if (!m.brand || !mn) continue;
-        rows.push({ sku: p.sku, brand: m.brand, model: m.model, model_norm: mn });
+        if (!mn) continue;                  // бренд може бути порожнім (таблиця без колонки бренду)
+        rows.push({ sku: p.sku, brand: m.brand || '', model: m.model, model_norm: mn });
       }
     }
 

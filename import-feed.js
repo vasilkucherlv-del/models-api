@@ -48,22 +48,30 @@ async function readSource(src) {
 //          модель — токен, що містить цифру (код техніки). Пари "бренд → модель".
 //          На першому ж prose-слові (з малої літери) розбір зупиняється — щоб текст
 //          опису ПІСЛЯ таблиці не потрапляв у моделі.
+// Слова-заголовки таблиці — НІКОЛИ не бренд (інакше "Модель" з одноколонкової
+// таблиці стає фейковим брендом). Порівнюємо лише літери, регістронезалежно.
+const HEADER_WORDS = new Set(['бренд', 'модель', 'моделі', 'модели', 'моделями', 'техніки', 'brand', 'model']);
+function isHeaderWord(s) {
+  return HEADER_WORDS.has(s.replace(/[^A-Za-zА-Яа-яЇІЄҐїієґ]/g, '').toLowerCase());
+}
+
 function parseCompat(descText) {
   const t = clean(descText);
   const mk = t.match(/Сумісн\S*\s+(?:із|iз|з|с)\s+моделями/i);
   if (!mk) return [];
-  let tail = t.slice(mk.index + mk[0].length);
-  tail = tail.replace(/^[:\s]*/, '').replace(/^Бренд\s+моделі\s+Модель\s*/i, '');
+  let tail = t.slice(mk.index + mk[0].length).replace(/^[:\s]*/, '');
 
   const tokens = tail.split(' ').filter(Boolean);
   const out = [];
-  let brand = null;
+  let brand = '';                  // може лишатись порожнім (таблиця без колонки бренду)
   const isModel = s => /\d/.test(s) && /^[A-Za-z0-9][A-Za-z0-9/.,+\-]*$/.test(s);
   const isBrand = s => /^[A-ZА-ЯЇІЄҐ][A-Za-zА-Яа-яЇЁїієґ&.\-]*$/.test(s);
 
   for (const tok of tokens) {
     if (isModel(tok)) {
-      if (brand) out.push({ brand, model: tok });
+      out.push({ brand, model: tok });
+    } else if (isHeaderWord(tok)) {
+      continue;                    // "Бренд" / "моделі" / "Модель" — пропускаємо
     } else if (isBrand(tok)) {
       brand = tok;                 // новий бренд для наступних моделей
     } else {
@@ -123,7 +131,7 @@ async function main() {
       if (REPLACE) await client.query('DELETE FROM compatibility WHERE sku = $1', [p.sku]);
       for (const m of p.models) {
         const mn = norm(m.model);
-        if (!m.brand || !mn) { skipped++; continue; }
+        if (!mn) { skipped++; continue; }   // бренд може бути порожнім (таблиця без колонки бренду)
         await client.query(
           `INSERT INTO compatibility (sku, brand, model, model_norm)
              VALUES ($1, $2, $3, $4)
