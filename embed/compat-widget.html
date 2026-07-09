@@ -1,0 +1,156 @@
+<!--
+  Блок "Сумісні моделі" для сторінки товару (Horoshop).
+  Вставляється у вкладку "Сумісні моделі" замість повної статичної таблиці.
+
+  Показує лише КІЛЬКІСТЬ сумісних моделей + поле пошуку. Повний список НЕ рендериться
+  (легша сторінка, список не копіюється, клієнт мусить перевірити свою модель).
+
+  Пошук — ТОЧНИЙ, літера-в-літеру (підрядок, без фаззі/одруківок): дані бере з models-api
+  (GET /api/models?sku=…&q=…), де model_norm LIKE '%q%'.
+
+  НАЛАШТУВАННЯ:
+    • data-api — публічний домен твого models-api (Railway → Generate Domain).
+    • data-sku — АРТИКУЛ товару. Для пілота вписано вручну (0873).
+      Для всього сайту заміни на шаблонну змінну Horoshop з артикулом товару,
+      напр. data-sku="#MODEL_ARTICLE#" (перевір точну назву змінного тега у своєму шаблоні).
+-->
+<div class="lc-compat"
+     data-api="https://YOUR-models-api.up.railway.app"
+     data-sku="0873"
+     data-min="3">
+  <div class="lc-head">
+    <div class="lc-count" data-lc="count">Перевірка сумісності…</div>
+    <div class="lc-note">Введіть модель вашої техніки — перевіримо, чи підходить ця запчастина.</div>
+  </div>
+  <div class="lc-searchbox">
+    <input type="search" class="lc-input" data-lc="input" autocomplete="off"
+           inputmode="latin" spellcheck="false"
+           placeholder="Напр. RO5295EA або MO151101" aria-label="Пошук моделі">
+    <button type="button" class="lc-clear" data-lc="clear" aria-label="Очистити" hidden>×</button>
+  </div>
+  <div class="lc-result" data-lc="result" aria-live="polite"></div>
+
+  <style>
+    .lc-compat{--lc-ok:#1a7f37;--lc-bad:#b42318;--lc-bd:#e3e6ea;--lc-mut:#6b7280;
+      max-width:640px;font-family:Arial,Helvetica,sans-serif;color:#1f2328;line-height:1.4}
+    .lc-head{margin:0 0 12px}
+    .lc-count{font-size:18px;font-weight:700}
+    .lc-count.is-ok{color:var(--lc-ok)}
+    .lc-note{font-size:13px;color:var(--lc-mut);margin-top:4px}
+    .lc-searchbox{position:relative;display:flex;align-items:center}
+    .lc-input{width:100%;box-sizing:border-box;font-size:16px;padding:12px 40px 12px 14px;
+      border:1px solid var(--lc-bd);border-radius:10px;outline:none;background:#fff;
+      text-transform:uppercase}
+    .lc-input::placeholder{text-transform:none;color:#9aa1a9}
+    .lc-input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+    .lc-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:0;background:transparent;
+      font-size:24px;line-height:1;color:#9aa1a9;cursor:pointer;padding:0 6px}
+    .lc-clear:hover{color:#1f2328}
+    .lc-result{margin-top:12px;min-height:4px}
+    .lc-banner{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;
+      padding:10px 12px;border-radius:10px;margin-bottom:8px}
+    .lc-banner.ok{background:#eaf6ec;color:var(--lc-ok);border:1px solid #bfe3c6}
+    .lc-banner.bad{background:#fdecea;color:var(--lc-bad);border:1px solid #f3c1bb}
+    .lc-banner.info{background:#f2f4f7;color:#374151;border:1px solid var(--lc-bd)}
+    .lc-list{list-style:none;margin:0;padding:0;border:1px solid var(--lc-bd);border-radius:10px;overflow:hidden}
+    .lc-list li{display:flex;justify-content:space-between;gap:12px;padding:9px 12px;font-size:14px}
+    .lc-list li:nth-child(odd){background:#fafbfc}
+    .lc-list .lc-brand{color:var(--lc-mut)}
+    .lc-list .lc-model{font-weight:600;font-family:"SFMono-Regular",Consolas,monospace}
+    .lc-hint{font-size:13px;color:var(--lc-mut)}
+    .lc-list mark{background:#fff3bf;color:inherit;padding:0 1px;border-radius:2px}
+    @media(max-width:520px){.lc-count{font-size:16px}.lc-input{font-size:16px}}
+  </style>
+
+  <script>
+  (function(){
+    var root = document.currentScript.closest('.lc-compat');
+    if(!root || root.dataset.lcInit) return;   // захист від подвійної ініціалізації
+    root.dataset.lcInit = '1';
+
+    var API = (root.dataset.api || '').replace(/\/+$/,'');
+    var SKU = (root.dataset.sku || '').trim();
+    var MIN = parseInt(root.dataset.min || '3', 10);
+    var $ = function(n){ return root.querySelector('[data-lc="'+n+'"]'); };
+    var elCount = $('count'), elInput = $('input'), elClear = $('clear'), elResult = $('result');
+
+    // Нормалізація — ТА САМА, що на сервері (db.js: великі, лише A-Z0-9).
+    function norm(s){ return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,''); }
+    function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+    function api(path){
+      return fetch(API+path, {headers:{'Accept':'application/json'}})
+        .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); });
+    }
+    function banner(kind, text){ return '<div class="lc-banner '+kind+'">'+text+'</div>'; }
+    function hi(model, qn){
+      var s = esc(model);
+      if(!qn) return s;
+      // підсвічуємо збіг за нормалізованою формою, зберігаючи оригінальні символи
+      var norms='', map=[];
+      for(var i=0;i<model.length;i++){ var c=model[i].toUpperCase();
+        if(/[A-Z0-9]/.test(c)){ norms+=c; map.push(i); } }
+      var at = norms.indexOf(qn);
+      if(at<0) return s;
+      var from=map[at], to=map[at+qn.length-1];
+      return esc(model.slice(0,from))+'<mark>'+esc(model.slice(from,to+1))+'</mark>'+esc(model.slice(to+1));
+    }
+
+    // Прев'ю: тільки кількість (список не показуємо).
+    function loadPreview(){
+      if(!API || !SKU){ elCount.textContent='Блок не налаштовано (data-api / data-sku).'; return; }
+      api('/api/preview?sku='+encodeURIComponent(SKU)).then(function(d){
+        var n = d.total|0;
+        if(n>0){ elCount.textContent='Сумісний з '+n+' '+plural(n,['моделлю','моделями','моделями'])+' техніки';
+          elCount.classList.add('is-ok'); }
+        else { elCount.textContent='Список сумісних моделей уточнюється'; }
+      }).catch(function(){ elCount.textContent='Перевірте модель у пошуку нижче'; });
+    }
+    function plural(n, forms){
+      var n10=n%10, n100=n%100;
+      if(n10===1 && n100!==11) return forms[0];
+      if(n10>=2 && n10<=4 && (n100<10||n100>=20)) return forms[1];
+      return forms[2];
+    }
+
+    var timer=null, lastQ='';
+    function onInput(){
+      var raw = elInput.value;
+      elClear.hidden = !raw;
+      var qn = norm(raw);
+      if(qn===lastQ) return; lastQ=qn;
+      clearTimeout(timer);
+      if(qn.length < MIN){
+        elResult.innerHTML = raw ? '<div class="lc-hint">Введіть щонайменше '+MIN+' символи моделі.</div>' : '';
+        return;
+      }
+      timer = setTimeout(function(){ runSearch(raw, qn); }, 180);
+    }
+    function runSearch(raw, qn){
+      elResult.innerHTML = '<div class="lc-hint">Шукаю…</div>';
+      api('/api/models?sku='+encodeURIComponent(SKU)+'&q='+encodeURIComponent(raw)).then(function(d){
+        if(norm(elInput.value)!==qn) return;              // застаріла відповідь — ігноруємо
+        if(d.tooShort){ elResult.innerHTML='<div class="lc-hint">Введіть щонайменше '+(d.min||MIN)+' символи.</div>'; return; }
+        if(d.tooMany){ elResult.innerHTML=banner('info','Забагато збігів — уточніть модель (введіть більше символів).'); return; }
+        var items = (d.items||[]);
+        if(!items.length){
+          elResult.innerHTML = banner('bad','✕ Моделі «'+esc(raw.trim())+'» немає у списку сумісних')
+            + '<div class="lc-hint">Можливо, підійде за іншими параметрами — напишіть нам, перевіримо.</div>';
+          return;
+        }
+        var html = banner('ok','✓ Підходить — знайдено у списку сумісних ('+items.length+')');
+        html += '<ul class="lc-list">'+items.map(function(it){
+          return '<li><span class="lc-brand">'+esc(it.brand)+'</span><span class="lc-model">'+hi(it.model,qn)+'</span></li>';
+        }).join('')+'</ul>';
+        elResult.innerHTML = html;
+      }).catch(function(){
+        elResult.innerHTML = '<div class="lc-hint">Не вдалося перевірити зараз. Спробуйте ще раз.</div>';
+      });
+    }
+
+    elInput.addEventListener('input', onInput);
+    elClear.addEventListener('click', function(){ elInput.value=''; elClear.hidden=true; lastQ=''; elResult.innerHTML=''; elInput.focus(); });
+    loadPreview();
+  })();
+  </script>
+</div>

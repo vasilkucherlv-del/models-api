@@ -126,6 +126,32 @@ app.post('/api/import', async (req, res) => {
   }
 });
 
+// === Експорт усієї сумісності (для індексатора Meili: приховане пошукове поле) ===
+// GET /api/export            → { count, items:[{ sku, models:[...] }] }
+// GET /api/export?sku=0873   → тільки один товар (для пілота)
+// Захищено X-Import-Key — щоб повний список не був публічно доступний.
+app.get('/api/export', async (req, res) => {
+  if (req.get('X-Import-Key') !== process.env.IMPORT_KEY) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try {
+    const sku = String(req.query.sku || '').trim();
+    const { rows } = sku
+      ? await pool.query('SELECT sku, model FROM compatibility WHERE sku = $1 ORDER BY sku, model', [sku])
+      : await pool.query('SELECT sku, model FROM compatibility ORDER BY sku, model');
+    const map = new Map();
+    for (const r of rows) {
+      if (!map.has(r.sku)) map.set(r.sku, []);
+      map.get(r.sku).push(r.model);
+    }
+    const items = Array.from(map, ([sku, models]) => ({ sku, models }));
+    res.json({ count: rows.length, items });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
 init()
   .then(() => app.listen(PORT, () => console.log('API на порту ' + PORT)))
   .catch((e) => { console.error('Помилка ініціалізації БД:', e); process.exit(1); });
