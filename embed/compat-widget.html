@@ -55,6 +55,7 @@
     +'.lcw-banner.ok{background:#eaf6ec;color:var(--ok);border:1px solid #bfe3c6}'
     +'.lcw-banner.bad{background:#fdecea;color:var(--bad);border:1px solid #f3c1bb}'
     +'.lcw-banner.info{background:#f2f4f7;color:#374151;border:1px solid var(--bd)}'
+    +'.lcw-banner.warn{background:#fff8e6;color:#8a6d00;border:1px solid #f2df9e}'
     +'.lcw-help{font-size:13px;color:#4b5563;line-height:1.55}'
     +'.lcw-hint{font-size:13px;color:var(--mut);padding:4px 2px}'
     +'@media(max-width:720px){.lcw-cols{grid-template-columns:1fr;gap:22px}.lcw-title{font-size:19px}}';
@@ -138,7 +139,16 @@
         if(d.tooMany){ setHtml(elQresult,'<div class="lcw-banner info">Забагато збігів — уточніть запит.</div>'); return; }
         var items=d.items||[];
         if(!items.length){ setHtml(elQresult,'<div class="lcw-banner bad">✕ Моделі «'+esc(raw.trim())+'» немає у списку сумісних</div>'); return; }
-        setHtml(elQresult,'<div class="lcw-banner ok">✓ Підходить до вашого приладу</div><ul class="lcw-list">'+listHtml(items,qn,true)+'</ul>');
+        // ТОЧНИЙ збіг: усі символи коду мають сходитись (суфікс після «/» важливий).
+        var exact = items.filter(function(it){ return norm(it.model)===qn; });
+        if(exact.length){
+          setHtml(elQresult,'<div class="lcw-banner ok">✓ Підходить до вашого приладу</div><ul class="lcw-list">'+listHtml(exact,qn,true)+'</ul>');
+        } else {
+          // частковий код — НЕ підтверджуємо сумісність, показуємо схожі коди для уточнення
+          setHtml(elQresult,'<div class="lcw-banner warn">⚠ Уточніть повний код моделі</div>'
+            +'<div class="lcw-hint">Цифри після «/» важливі — саме вони визначають сумісність. Перевірте точний код на шильдику приладу. Схожі сумісні коди:</div>'
+            +'<ul class="lcw-list">'+listHtml(items,qn,true)+'</ul>');
+        }
       }).catch(function(){ setHtml(elQresult,'<div class="lcw-hint">Не вдалося перевірити. Спробуйте ще.</div>'); });
     },180);
   }
