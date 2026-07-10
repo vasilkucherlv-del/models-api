@@ -144,10 +144,9 @@
         if(exact.length){
           setHtml(elQresult,'<div class="lcw-banner ok">✓ Підходить до вашого приладу</div><ul class="lcw-list">'+listHtml(exact,qn,true)+'</ul>');
         } else {
-          // частковий код — НЕ підтверджуємо сумісність, показуємо схожі коди для уточнення
+          // частковий код — лише повідомлення, без списку схожих
           setHtml(elQresult,'<div class="lcw-banner warn">⚠ Уточніть повний код моделі</div>'
-            +'<div class="lcw-hint">Цифри після «/» важливі — саме вони визначають сумісність. Перевірте точний код на шильдику приладу. Схожі сумісні коди:</div>'
-            +'<ul class="lcw-list">'+listHtml(items,qn,true)+'</ul>');
+            +'<div class="lcw-hint">Введено неповний код. Цифри після «/» важливі — саме вони визначають сумісність. Перевірте точний код на шильдику приладу.</div>');
         }
       }).catch(function(){ setHtml(elQresult,'<div class="lcw-hint">Не вдалося перевірити. Спробуйте ще.</div>'); });
     },180);
