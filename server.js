@@ -7,8 +7,8 @@ const { parseFeed } = require('./import-feed');
 
 const PORT = process.env.PORT || 3000;
 const MIN_CHARS = parseInt(process.env.MIN_CHARS || '3', 10);     // мінімум символів для пошуку
-const RESULT_CAP = parseInt(process.env.RESULT_CAP || '40', 10);  // стеля видачі пошуку (більше → "уточніть")
-const BROWSE_CAP = parseInt(process.env.BROWSE_CAP || '500', 10); // стеля перегляду моделей бренду (для лівого списку)
+const RESULT_CAP = parseInt(process.env.RESULT_CAP || '40', 10);     // стеля видачі пошуку (більше → "уточніть")
+const BROWSE_PREVIEW = parseInt(process.env.BROWSE_PREVIEW || '8', 10); // скільки моделей бренду показувати як приклад (решта — лише через пошук)
 const PREVIEW_LIMIT = parseInt(process.env.PREVIEW_LIMIT || '12', 10);
 const FEED_URL = process.env.FEED_URL ||
   'https://www.lartek.com.ua/content/export/def50f4a67a9cdf49099014837c8ba76.xml';
@@ -82,15 +82,25 @@ app.get('/api/models', limiter, async (req, res) => {
     if (hasBrand) { params.push(brand); where += ` AND brand = $${params.length}`; }
     if (q.length >= MIN_CHARS) { params.push(q); where += ` AND model_norm LIKE '%' || $${params.length} || '%'`; }
 
-    // перегляд бренду допускає більше рядків, ніж швидкий пошук
-    const cap = hasBrand && q.length < MIN_CHARS ? BROWSE_CAP : RESULT_CAP;
-    params.push(cap + 1);
+    // Перегляд бренду без запиту → лише КІЛЬКА моделей (приклад).
+    // Повний список у браузер не потрапляє — його не можна проглянути/скопіювати.
+    const isBrowse = hasBrand && q.length < MIN_CHARS;
+    if (isBrowse) {
+      params.push(BROWSE_PREVIEW);
+      const { rows } = await pool.query(
+        `SELECT brand, model FROM compatibility WHERE ${where} ORDER BY model LIMIT $${params.length}`,
+        params
+      );
+      return res.json({ items: rows, preview: true });
+    }
+
+    // Пошук: беремо на 1 більше за стелю, щоб зрозуміти, чи збігів забагато.
+    params.push(RESULT_CAP + 1);
     const { rows } = await pool.query(
       `SELECT brand, model FROM compatibility WHERE ${where} ORDER BY model LIMIT $${params.length}`,
       params
     );
-
-    if (rows.length > cap) return res.json({ tooMany: true, cap });
+    if (rows.length > RESULT_CAP) return res.json({ tooMany: true, cap: RESULT_CAP });
     return res.json({ items: rows });
   } catch (e) {
     console.error(e);
