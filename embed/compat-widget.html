@@ -91,6 +91,8 @@
     +'.lcw-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;font-size:14px;border-top:1px solid #eef1f4}'
     +'.lcw-list li:first-child{border-top:0}'
     +'.lcw-model{font-weight:600}'
+    +'.lcw-cell{display:flex;flex-direction:column;gap:1px}'
+    +'.lcw-code{font-size:12px;color:var(--mut);font-family:"SFMono-Regular",Consolas,monospace}'
     +'.lcw-brand{color:var(--mut);font-weight:400;margin-right:6px}'
     +'.lcw-check{color:var(--ok);font-weight:700;flex:0 0 auto}'
     +'.lcw-list mark{background:#fff3bf;padding:0 1px;border-radius:2px}'
@@ -140,8 +142,13 @@
     var nm='',map=[]; for(var i=0;i<model.length;i++){var c=model[i].toUpperCase(); if(/[A-Z0-9]/.test(c)){nm+=c;map.push(i);}}
     var at=nm.indexOf(qn); if(at<0) return s; var f=map[at],t=map[at+qn.length-1];
     return esc(model.slice(0,f))+'<mark>'+esc(model.slice(f,t+1))+'</mark>'+esc(model.slice(t+1)); }
-  function li(it,qn,showBrand){ return '<li><span>'+(showBrand?'<span class="lcw-brand">'+esc(it.brand)+'</span>':'')+'<span class="lcw-model">'+hi(it.model,qn)+'</span></span><span class="lcw-check">✓</span></li>'; }
-  function listHtml(items,qn,showBrand){ return items.length ? items.map(function(it){return li(it,qn,showBrand);}).join('') : '<div class="lcw-empty">—</div>'; }
+  function li(it,qn){
+    var b=it.brand?'<span class="lcw-brand">'+esc(it.brand)+' </span>':'';
+    var main='<span class="lcw-model">'+b+hi(it.model,qn)+'</span>';
+    var code=it.code?'<span class="lcw-code">'+hi(it.code,qn)+'</span>':'';
+    return '<li><span class="lcw-cell">'+main+code+'</span><span class="lcw-check">✓</span></li>';
+  }
+  function listHtml(items,qn){ return items.length ? items.map(function(it){return li(it,qn);}).join('') : '<div class="lcw-empty">—</div>'; }
 
   if(!API || !SKU){ setText(elTotal,'(no data-api / data-sku)'); return; }
 
@@ -164,7 +171,7 @@
       var items=(d.items||[]).slice(0, PREVIEW);
       var total=BRAND_COUNT[brand]!=null?BRAND_COUNT[brand]:items.length;
       var more=total-items.length;
-      var ul='<ul class="lcw-list">'+listHtml(items, '', false)+'</ul>';
+      var ul='<ul class="lcw-list">'+listHtml(items, '')+'</ul>';
       var note=more>0 ? '<div class="lcw-hint">'+T.shownOf(items.length, nModels(total))+'</div>' : '';
       setHtml(elBlist, ul+note);
     }).catch(function(){ setHtml(elBlist,'<div class="lcw-empty">'+T.loadErr+'</div>'); });
@@ -182,10 +189,10 @@
         if(d.tooMany){ setHtml(elQresult,'<div class="lcw-banner info">'+T.tooMany+'</div>'); return; }
         var items=d.items||[];
         if(!items.length){ setHtml(elQresult,'<div class="lcw-banner bad">'+T.notFound(esc(raw.trim()))+'</div>'); return; }
-        // ТОЧНИЙ збіг: усі символи коду мають сходитись (суфікс після «/» важливий).
-        var exact = items.filter(function(it){ return norm(it.model)===qn; });
+        // ТОЧНИЙ збіг: усі символи мають сходитись (за моделлю АБО за індустр. кодом).
+        var exact = items.filter(function(it){ return norm(it.model)===qn || (it.code && norm(it.code)===qn); });
         if(exact.length){
-          setHtml(elQresult,'<div class="lcw-banner ok">'+T.fits+'</div><ul class="lcw-list">'+listHtml(exact,qn,true)+'</ul>');
+          setHtml(elQresult,'<div class="lcw-banner ok">'+T.fits+'</div><ul class="lcw-list">'+listHtml(exact,qn)+'</ul>');
         } else {
           setHtml(elQresult,'<div class="lcw-banner warn">'+T.incTitle+'</div><div class="lcw-hint">'+T.incHint+'</div>');
         }
