@@ -26,6 +26,9 @@
   var SKU = (root.getAttribute('data-sku')||'').trim();
   var MIN = parseInt(root.getAttribute('data-min')||'3',10);
   var PREVIEW = parseInt(root.getAttribute('data-preview')||'8',10);
+  // Мовна версія сайту (ua/ru) з поточного URL → посилання на контакти тією ж мовою.
+  var LANG = (location.pathname.match(/^\/(ru|ua)(\/|$)/)||[])[1] || 'ua';
+  var CONTACT = location.origin + '/' + LANG + '/kontakty/';
 
   // ── стилі (додаємо один раз, через JS — щоб редактор не чіпав) ──
   if(!document.getElementById('lartek-compat-style')){
@@ -57,6 +60,7 @@
     +'.lcw-banner.info{background:#f2f4f7;color:#374151;border:1px solid var(--bd)}'
     +'.lcw-banner.warn{background:#fff8e6;color:#8a6d00;border:1px solid #f2df9e}'
     +'.lcw-help{font-size:13px;color:#4b5563;line-height:1.55}'
+    +'.lcw-help a{color:#2563eb;text-decoration:underline}'
     +'.lcw-hint{font-size:13px;color:var(--mut);padding:4px 2px}'
     +'@media(max-width:720px){.lcw-cols{grid-template-columns:1fr;gap:22px}.lcw-title{font-size:19px}}';
     document.head.appendChild(st);
@@ -77,7 +81,7 @@
     +    '<div class="lcw-label">Введіть модель для швидкого пошуку <span class="lcw-mut lcw-qcount"></span></div>'
     +    '<div class="lcw-inwrap"><span class="lcw-ico">🔍</span><input class="lcw-input lcw-input--ico lcw-qinput" type="search" autocomplete="off" spellcheck="false" placeholder="Модель або індустріальний код, мінімум 3 символи"></div>'
     +    '<div class="lcw-result lcw-qresult"></div>'
-    +    '<div class="lcw-help">Ми зібрали та структурували велику кількість моделей різної побутової техніки. У цьому розділі з глобального списку відібрано <b>сумісні</b> моделі. Спочатку оберіть бренд техніки, потім почніть вводити модель (або індустріальний/комерційний код). Якщо позиція підходить — ваша модель обов’язково відобразиться у списку. Якщо вашої моделі немає — <b>зв’яжіться з нами</b>.</div>'
+    +    '<div class="lcw-help">Тут відображено сумісні моделі для цієї запчастини. Оберіть бренд техніки, потім введіть модель приладу. Якщо позиція сумісна з вашим приладом — ваша модель обов’язково відобразиться у списку. Якщо вашої моделі немає — <a class="lcw-link" href="'+CONTACT+'" target="_blank" rel="noopener">зв’яжіться з нами</a>.</div>'
     +  '</div>'
     +'</div>';
 
