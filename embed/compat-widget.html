@@ -26,6 +26,18 @@
 
   var API = (root.getAttribute('data-api')||'').replace(/\/+$/,'');
   var SKU = (root.getAttribute('data-sku')||'').trim();
+  if(!SKU){ var _m=document.querySelector('meta[itemprop="sku"]'); SKU=_m?String(_m.getAttribute('content')||'').trim():''; }  // авто-артикул зі сторінки
+
+  // Сховати вкладку «Сумісні моделі», якщо у товару немає сумісних моделей.
+  function hideTab(){
+    var panel = root.closest ? root.closest('[data-content-id]') : null;
+    if(panel){
+      panel.style.display='none';
+      var id=panel.getAttribute('data-content-id');
+      var links=document.querySelectorAll('[href="#'+id+'"]');
+      for(var i=0;i<links.length;i++) links[i].style.display='none';
+    } else { root.style.display='none'; }
+  }
   var MIN = parseInt(root.getAttribute('data-min')||'3',10);
   var PREVIEW = parseInt(root.getAttribute('data-preview')||'8',10);
 
@@ -138,7 +150,7 @@
     api('/api/brands?sku='+encodeURIComponent(SKU)).then(function(d){
       var brands=d.brands||[], total=d.total|0;
       setText(elTotal,'('+nModels(total)+')'); setText(elQcount,'('+nModels(total)+')');
-      if(!brands.length){ setHtml(elBrand,'<option>—</option>'); setHtml(elBlist,'<div class="lcw-empty">'+T.listUpdating+'</div>'); return; }
+      if(!brands.length || total<=0){ hideTab(); return; }   // немає моделей → ховаємо вкладку
       brands.forEach(function(b){ BRAND_COUNT[b.brand]=b.count; });
       setHtml(elBrand, brands.map(function(b){ return '<option value="'+esc(b.brand)+'">'+esc(b.brand||T.other)+' ('+b.count+')</option>'; }).join(''));
       loadBrandModels();
