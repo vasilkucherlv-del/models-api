@@ -58,7 +58,10 @@ curl -X POST "$API_URL/api/import" \
 
 ## Ендпойнти
 - `GET /health` → `ok`
-- `GET /api/models?sku=АРТИКУЛ&q=SMV68` → `{ "items":[{brand,model}] }`
+- `GET /api/brands?sku=АРТИКУЛ` → `{ "total":N, "brands":[{brand,count}] }` (для випадайки брендів)
+- `GET /api/models?sku=АРТИКУЛ&q=SMV68` → `{ "items":[{brand,model}] }` (швидкий пошук)
+  - `&brand=Bosch` — перегляд усіх моделей бренду (лівий список; стеля `BROWSE_CAP`)
+  - `&brand=Bosch&q=SMV` — пошук у межах бренду
   - закоротко: `{ "tooShort":true, "min":3 }`
   - забагато збігів: `{ "tooMany":true, "cap":40 }`
 - `GET /api/preview?sku=АРТИКУЛ` → `{ "total":N, "items":[...] }` (невеликий список + кількість)

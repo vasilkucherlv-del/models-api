@@ -7,7 +7,8 @@ const { parseFeed } = require('./import-feed');
 
 const PORT = process.env.PORT || 3000;
 const MIN_CHARS = parseInt(process.env.MIN_CHARS || '3', 10);     // мінімум символів для пошуку
-const RESULT_CAP = parseInt(process.env.RESULT_CAP || '40', 10);  // стеля видачі (більше → "уточніть")
+const RESULT_CAP = parseInt(process.env.RESULT_CAP || '40', 10);  // стеля видачі пошуку (більше → "уточніть")
+const BROWSE_CAP = parseInt(process.env.BROWSE_CAP || '500', 10); // стеля перегляду моделей бренду (для лівого списку)
 const PREVIEW_LIMIT = parseInt(process.env.PREVIEW_LIMIT || '12', 10);
 const FEED_URL = process.env.FEED_URL ||
   'https://www.lartek.com.ua/content/export/def50f4a67a9cdf49099014837c8ba76.xml';
@@ -16,6 +17,8 @@ const FEED_URL = process.env.FEED_URL ||
 const ALLOWED = [
   'https://lartek.com.ua', 'https://www.lartek.com.ua',
   'https://komplektom.com.ua', 'https://www.komplektom.com.ua',
+  // додаткові домени через змінну EXTRA_ORIGINS (через кому), напр. для тестів/піддоменів
+  ...(process.env.EXTRA_ORIGINS || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean),
 ];
 
 const app = express();
@@ -38,26 +41,56 @@ const limiter = rateLimit({
 
 app.get('/health', (req, res) => res.send('ok'));
 
-// === Пошук моделей для товару ===
-// GET /api/models?sku=DEMO123&q=SMV68
+// === Бренди товару + кількість моделей (для випадайки зліва) ===
+// GET /api/brands?sku=DEMO123 → { total, brands:[{brand,count}] }
+app.get('/api/brands', limiter, async (req, res) => {
+  try {
+    const sku = String(req.query.sku || '').trim();
+    if (!sku) return res.status(400).json({ error: 'sku_required' });
+    const { rows } = await pool.query(
+      `SELECT brand, COUNT(*)::int AS count
+         FROM compatibility WHERE sku = $1
+         GROUP BY brand ORDER BY count DESC, brand`,
+      [sku]
+    );
+    const total = rows.reduce((n, r) => n + r.count, 0);
+    return res.json({ total, brands: rows });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// === Пошук / перегляд моделей товару ===
+// GET /api/models?sku=DEMO123&q=SMV68            — швидкий пошук по всіх брендах
+// GET /api/models?sku=DEMO123&brand=Bosch        — перегляд усіх моделей бренду (лівий список)
+// GET /api/models?sku=DEMO123&brand=Bosch&q=SMV  — пошук у межах бренду
 app.get('/api/models', limiter, async (req, res) => {
   try {
     const sku = String(req.query.sku || '').trim();
     if (!sku) return res.status(400).json({ error: 'sku_required' });
 
+    const hasBrand = req.query.brand != null;
+    const brand = hasBrand ? String(req.query.brand) : null;
     const q = norm(req.query.q);
-    if (q.length < MIN_CHARS) return res.json({ tooShort: true, min: MIN_CHARS });
 
-    // беремо на 1 більше за стелю — щоб зрозуміти, чи збігів забагато
+    // Без бренду і короткий запит — нема що показувати (це швидкий пошук справа).
+    if (!hasBrand && q.length < MIN_CHARS) return res.json({ tooShort: true, min: MIN_CHARS });
+
+    const params = [sku];
+    let where = 'sku = $1';
+    if (hasBrand) { params.push(brand); where += ` AND brand = $${params.length}`; }
+    if (q.length >= MIN_CHARS) { params.push(q); where += ` AND model_norm LIKE '%' || $${params.length} || '%'`; }
+
+    // перегляд бренду допускає більше рядків, ніж швидкий пошук
+    const cap = hasBrand && q.length < MIN_CHARS ? BROWSE_CAP : RESULT_CAP;
+    params.push(cap + 1);
     const { rows } = await pool.query(
-      `SELECT brand, model FROM compatibility
-        WHERE sku = $1 AND model_norm LIKE '%' || $2 || '%'
-        ORDER BY model
-        LIMIT $3`,
-      [sku, q, RESULT_CAP + 1]
+      `SELECT brand, model FROM compatibility WHERE ${where} ORDER BY model LIMIT $${params.length}`,
+      params
     );
 
-    if (rows.length > RESULT_CAP) return res.json({ tooMany: true, cap: RESULT_CAP });
+    if (rows.length > cap) return res.json({ tooMany: true, cap });
     return res.json({ items: rows });
   } catch (e) {
     console.error(e);
