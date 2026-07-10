@@ -1,166 +1,147 @@
 <!--
   Блок "Сумісні моделі" для сторінки товару (Horoshop) — двоколонковий.
+  СТІЙКИЙ до редактора Horoshop: у вставленому коді немає порожніх елементів і <style>,
+  усю начинку скрипт будує сам уже на сторінці (редактору нема що "чистити").
 
-  Зліва: вибір бренду техніки (випадайка з кількістю) + перегляд моделей цього бренду (з ✓).
-  Справа: швидкий пошук по всіх брендах (мінімум 3 символи) + пояснення.
-  Повного списку "простирадлом" немає: показуємо частину (по бренду) і даємо точний пошук.
+  Зліва: вибір бренду техніки (з кількістю) + перелік моделей бренду з ✓.
+  Справа: швидкий ТОЧНИЙ пошук по всіх брендах (мінімум 3 символи) + пояснення.
 
-  Пошук ТОЧНИЙ, літера-в-літеру (підрядок, без фаззі): дані з models-api.
-
-  НАЛАШТУВАННЯ:
+  НАЛАШТУВАННЯ (на div нижче):
     • data-api — публічний домен твого models-api.
     • data-sku — АРТИКУЛ товару (для сайту заміни на шаблонну змінну Horoshop з артикулом).
 -->
-<div class="lc2" data-api="https://YOUR-models-api.up.railway.app" data-sku="0873" data-min="3">
-  <div class="lc2-title">Підходить до моделей: <span class="lc2-total" data-lc="total"></span></div>
+<div class="lartek-compat-mount" data-api="https://YOUR-models-api.up.railway.app" data-sku="0873" data-min="3">Перевірка сумісності…</div>
+<script>
+(function(){
+  var cur = document.currentScript;
+  // знайти свій монтажний div (перед скриптом; запасний варіант — перший неініціалізований)
+  var root = null, p = cur ? cur.previousElementSibling : null;
+  while(p){ if(p.classList && p.classList.contains('lartek-compat-mount')){ root = p; break; } p = p.previousElementSibling; }
+  if(!root){ var all = document.querySelectorAll('.lartek-compat-mount');
+    for(var i=0;i<all.length;i++){ if(!all[i].dataset.lcInit){ root = all[i]; break; } } }
+  if(!root || root.dataset.lcInit) return;
+  root.dataset.lcInit = '1';
 
-  <div class="lc2-cols">
-    <!-- ЛІВА КОЛОНКА: бренд + перегляд -->
-    <div class="lc2-col">
-      <label class="lc2-label" data-lc="brandLabel">Виберіть бренд техніки</label>
-      <select class="lc2-select" data-lc="brand" aria-label="Бренд техніки"></select>
-      <div class="lc2-inwrap">
-        <input class="lc2-input" data-lc="binput" type="search" autocomplete="off" spellcheck="false"
-               placeholder="Пошук у списку бренду…" aria-label="Пошук у списку бренду">
-      </div>
-      <ul class="lc2-list" data-lc="blist"></ul>
-    </div>
+  var API = (root.getAttribute('data-api')||'').replace(/\/+$/,'');
+  var SKU = (root.getAttribute('data-sku')||'').trim();
+  var MIN = parseInt(root.getAttribute('data-min')||'3',10);
 
-    <!-- ПРАВА КОЛОНКА: швидкий пошук + пояснення -->
-    <div class="lc2-col">
-      <div class="lc2-label">Введіть модель для швидкого пошуку <span class="lc2-mut" data-lc="qcount"></span></div>
-      <div class="lc2-inwrap">
-        <span class="lc2-ico">🔍</span>
-        <input class="lc2-input lc2-input--ico" data-lc="qinput" type="search" autocomplete="off" spellcheck="false"
-               placeholder="Модель або індустріальний код, мінімум 3 символи" aria-label="Швидкий пошук моделі">
-      </div>
-      <div class="lc2-result" data-lc="qresult" aria-live="polite"></div>
-      <div class="lc2-help">
-        Ми зібрали та структурували велику кількість моделей різної побутової техніки.
-        У цьому розділі з глобального списку відібрано <b>сумісні</b> моделі.
-        Спочатку оберіть бренд техніки, потім почніть вводити модель (або індустріальний/комерційний код).
-        Якщо позиція підходить — ваша модель обов'язково відобразиться у списку.
-        Якщо вашої моделі немає — <b>зв'яжіться з нами</b>.
-      </div>
-    </div>
-  </div>
+  // ── стилі (додаємо один раз, через JS — щоб редактор не чіпав) ──
+  if(!document.getElementById('lartek-compat-style')){
+    var st = document.createElement('style'); st.id='lartek-compat-style';
+    st.textContent = ''
+    +'.lcw{--ok:#1a7f37;--bad:#b42318;--bd:#e3e6ea;--mut:#6b7280;--hd:#7a8a99;font-family:Arial,Helvetica,sans-serif;color:#1f2328;line-height:1.4;max-width:1100px}'
+    +'.lcw-title{font-size:22px;color:var(--hd);font-weight:400;padding-bottom:10px;border-bottom:1px solid var(--bd);margin-bottom:16px}'
+    +'.lcw-total{font-size:14px;color:var(--mut)}'
+    +'.lcw-cols{display:grid;grid-template-columns:1fr 1fr;gap:28px}'
+    +'.lcw-label{display:block;font-size:13px;color:var(--hd);margin:0 0 6px}'
+    +'.lcw-mut{color:var(--mut);font-size:12px}'
+    +'.lcw-inwrap{position:relative;margin:8px 0}'
+    +'.lcw-ico{position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:.5;font-size:14px}'
+    +'.lcw select,.lcw-input{width:100%;box-sizing:border-box;font-size:15px;padding:11px 12px;border:1px solid var(--bd);border-radius:8px;background:#fff;outline:none;font-family:inherit}'
+    +'.lcw-input--ico{padding-left:36px}'
+    +'.lcw select:focus,.lcw-input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.15)}'
+    +'.lcw-list{list-style:none;margin:8px 0 0;padding:0;max-height:320px;overflow-y:auto;border:1px solid var(--bd);border-radius:8px}'
+    +'.lcw-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;font-size:14px;border-top:1px solid #eef1f4}'
+    +'.lcw-list li:first-child{border-top:0}'
+    +'.lcw-model{font-weight:600}'
+    +'.lcw-brand{color:var(--mut);font-weight:400;margin-right:6px}'
+    +'.lcw-check{color:var(--ok);font-weight:700;flex:0 0 auto}'
+    +'.lcw-list mark{background:#fff3bf;padding:0 1px;border-radius:2px}'
+    +'.lcw-empty{padding:12px;color:var(--mut);font-size:14px}'
+    +'.lcw-result{margin:4px 0 12px;min-height:2px}'
+    +'.lcw-banner{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;padding:10px 12px;border-radius:8px;margin-bottom:8px}'
+    +'.lcw-banner.ok{background:#eaf6ec;color:var(--ok);border:1px solid #bfe3c6}'
+    +'.lcw-banner.bad{background:#fdecea;color:var(--bad);border:1px solid #f3c1bb}'
+    +'.lcw-banner.info{background:#f2f4f7;color:#374151;border:1px solid var(--bd)}'
+    +'.lcw-help{font-size:13px;color:#4b5563;line-height:1.55}'
+    +'.lcw-hint{font-size:13px;color:var(--mut);padding:4px 2px}'
+    +'@media(max-width:720px){.lcw-cols{grid-template-columns:1fr;gap:22px}.lcw-title{font-size:19px}}';
+    document.head.appendChild(st);
+  }
 
-  <style>
-    .lc2{--ok:#1a7f37;--bad:#b42318;--bd:#e3e6ea;--mut:#6b7280;--hd:#7a8a99;
-      font-family:Arial,Helvetica,sans-serif;color:#1f2328;line-height:1.4;max-width:1100px}
-    .lc2-title{font-size:22px;color:var(--hd);font-weight:400;padding-bottom:10px;border-bottom:1px solid var(--bd);margin-bottom:16px}
-    .lc2-total{font-size:14px;color:var(--mut)}
-    .lc2-cols{display:grid;grid-template-columns:1fr 1fr;gap:28px}
-    .lc2-label{display:block;font-size:13px;color:var(--hd);margin:0 0 6px}
-    .lc2-mut{color:var(--mut);font-size:12px}
-    .lc2-inwrap{position:relative;margin:8px 0}
-    .lc2-ico{position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:.5;font-size:14px}
-    .lc2-select,.lc2-input{width:100%;box-sizing:border-box;font-size:15px;padding:11px 12px;
-      border:1px solid var(--bd);border-radius:8px;background:#fff;outline:none}
-    .lc2-input--ico{padding-left:36px}
-    .lc2-select:focus,.lc2-input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.15)}
-    .lc2-list{list-style:none;margin:8px 0 0;padding:0;max-height:320px;overflow-y:auto;
-      border:1px solid var(--bd);border-radius:8px}
-    .lc2-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;
-      padding:9px 12px;font-size:14px;border-top:1px solid #eef1f4}
-    .lc2-list li:first-child{border-top:0}
-    .lc2-model{font-weight:600}
-    .lc2-brand{color:var(--mut);font-weight:400;margin-right:6px}
-    .lc2-check{color:var(--ok);font-weight:700;flex:0 0 auto}
-    .lc2-list mark{background:#fff3bf;padding:0 1px;border-radius:2px}
-    .lc2-empty{padding:12px;color:var(--mut);font-size:14px}
-    .lc2-result{margin:4px 0 12px;min-height:2px}
-    .lc2-banner{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;padding:10px 12px;border-radius:8px;margin-bottom:8px}
-    .lc2-banner.ok{background:#eaf6ec;color:var(--ok);border:1px solid #bfe3c6}
-    .lc2-banner.bad{background:#fdecea;color:var(--bad);border:1px solid #f3c1bb}
-    .lc2-banner.info{background:#f2f4f7;color:#374151;border:1px solid var(--bd)}
-    .lc2-help{font-size:13px;color:#4b5563;line-height:1.55}
-    .lc2-hint{font-size:13px;color:var(--mut);padding:4px 2px}
-    @media(max-width:720px){ .lc2-cols{grid-template-columns:1fr;gap:22px} .lc2-title{font-size:19px} }
-  </style>
+  // ── будуємо начинку (у вставленому коді порожніх елементів немає) ──
+  root.className = 'lcw';
+  root.textContent = '';
+  root.innerHTML = ''
+    +'<div class="lcw-title">Підходить до моделей: <span class="lcw-total"></span></div>'
+    +'<div class="lcw-cols">'
+    +  '<div>'
+    +    '<label class="lcw-label">Виберіть бренд техніки</label>'
+    +    '<select class="lcw-brand" aria-label="Бренд техніки"></select>'
+    +    '<div class="lcw-inwrap"><input class="lcw-input lcw-binput" type="search" autocomplete="off" spellcheck="false" placeholder="Пошук у списку бренду…"></div>'
+    +    '<ul class="lcw-list lcw-blist"></ul>'
+    +  '</div>'
+    +  '<div>'
+    +    '<div class="lcw-label">Введіть модель для швидкого пошуку <span class="lcw-mut lcw-qcount"></span></div>'
+    +    '<div class="lcw-inwrap"><span class="lcw-ico">🔍</span><input class="lcw-input lcw-input--ico lcw-qinput" type="search" autocomplete="off" spellcheck="false" placeholder="Модель або індустріальний код, мінімум 3 символи"></div>'
+    +    '<div class="lcw-result lcw-qresult"></div>'
+    +    '<div class="lcw-help">Ми зібрали та структурували велику кількість моделей різної побутової техніки. У цьому розділі з глобального списку відібрано <b>сумісні</b> моделі. Спочатку оберіть бренд техніки, потім почніть вводити модель (або індустріальний/комерційний код). Якщо позиція підходить — ваша модель обов’язково відобразиться у списку. Якщо вашої моделі немає — <b>зв’яжіться з нами</b>.</div>'
+    +  '</div>'
+    +'</div>';
 
-  <script>
-  (function(){
-    var root = document.currentScript.closest('.lc2');
-    if(!root || root.dataset.lcInit) return;
-    root.dataset.lcInit = '1';
+  var q = function(c){ return root.querySelector('.'+c); };
+  var elTotal=q('lcw-total'), elQcount=q('lcw-qcount'), elBrand=q('lcw-brand'),
+      elBinput=q('lcw-binput'), elBlist=q('lcw-blist'), elQinput=q('lcw-qinput'), elQresult=q('lcw-qresult');
+  var setText=function(el,t){ if(el) el.textContent=t; };
+  var setHtml=function(el,h){ if(el) el.innerHTML=h; };
 
-    var API = (root.dataset.api||'').replace(/\/+$/,'');
-    var SKU = (root.dataset.sku||'').trim();
-    var MIN = parseInt(root.dataset.min||'3',10);
-    var $ = function(n){ return root.querySelector('[data-lc="'+n+'"]'); };
-    var elTotal=$('total'), elQcount=$('qcount'), elBrand=$('brand'), elBinput=$('binput'),
-        elBlist=$('blist'), elQinput=$('qinput'), elQresult=$('qresult');
+  function norm(s){ return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,''); }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function api(path){ return fetch(API+path,{headers:{'Accept':'application/json'}}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }); }
+  function plural(n,f){ var a=n%10,b=n%100; return (a===1&&b!==11)?f[0]:(a>=2&&a<=4&&(b<10||b>=20))?f[1]:f[2]; }
+  function nModels(n){ return n+' '+plural(n,['модель','моделі','моделей']); }
+  function hi(model,qn){ var s=esc(model); if(!qn) return s;
+    var nm='',map=[]; for(var i=0;i<model.length;i++){var c=model[i].toUpperCase(); if(/[A-Z0-9]/.test(c)){nm+=c;map.push(i);}}
+    var at=nm.indexOf(qn); if(at<0) return s; var f=map[at],t=map[at+qn.length-1];
+    return esc(model.slice(0,f))+'<mark>'+esc(model.slice(f,t+1))+'</mark>'+esc(model.slice(t+1)); }
+  function li(it,qn,showBrand){ return '<li><span>'+(showBrand?'<span class="lcw-brand">'+esc(it.brand)+'</span>':'')+'<span class="lcw-model">'+hi(it.model,qn)+'</span></span><span class="lcw-check">✓</span></li>'; }
+  function listHtml(items,qn,showBrand){ return items.length ? items.map(function(it){return li(it,qn,showBrand);}).join('') : '<div class="lcw-empty">Нічого не знайдено.</div>'; }
 
-    function norm(s){ return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,''); }
-    function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
-      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-    function api(path){ return fetch(API+path,{headers:{'Accept':'application/json'}})
-      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }); }
-    function plural(n,f){ var a=n%10,b=n%100; return (a===1&&b!==11)?f[0]:(a>=2&&a<=4&&(b<10||b>=20))?f[1]:f[2]; }
-    function hi(model,qn){ var s=esc(model); if(!qn) return s;
-      var nm='',map=[]; for(var i=0;i<model.length;i++){var c=model[i].toUpperCase(); if(/[A-Z0-9]/.test(c)){nm+=c;map.push(i);}}
-      var at=nm.indexOf(qn); if(at<0) return s; var f=map[at],t=map[at+qn.length-1];
-      return esc(model.slice(0,f))+'<mark>'+esc(model.slice(f,t+1))+'</mark>'+esc(model.slice(t+1)); }
-    function li(it,qn,showBrand){
-      return '<li><span class="lc2-mn">'+(showBrand?'<span class="lc2-brand">'+esc(it.brand)+'</span>':'')
-        +'<span class="lc2-model">'+hi(it.model,qn)+'</span></span><span class="lc2-check">✓</span></li>';
-    }
-    function listHtml(items,qn,showBrand){
-      if(!items.length) return '<div class="lc2-empty">Нічого не знайдено.</div>';
-      return items.map(function(it){ return li(it,qn,showBrand); }).join('');
-    }
+  if(!API || !SKU){ setText(elTotal,'(блок не налаштовано: data-api / data-sku)'); return; }
 
-    // ── Ліва колонка: бренди + перегляд ──
-    function loadBrands(){
-      if(!API||!SKU){ elTotal.textContent='(блок не налаштовано)'; return; }
-      api('/api/brands?sku='+encodeURIComponent(SKU)).then(function(d){
-        var brands=d.brands||[], total=d.total|0;
-        elTotal.textContent='('+total+' '+plural(total,['модель','моделі','моделей'])+')';
-        elQcount.textContent='('+total+' '+plural(total,['модель','моделі','моделей'])+')';
-        if(!brands.length){ elBrand.innerHTML='<option>—</option>'; elBlist.innerHTML='<div class="lc2-empty">Список уточнюється.</div>'; return; }
-        elBrand.innerHTML=brands.map(function(b){
-          var name=b.brand||'Інші'; return '<option value="'+esc(b.brand)+'">'+esc(name)+' ('+b.count+')</option>';
-        }).join('');
-        loadBrandModels();
-      }).catch(function(){ elTotal.textContent=''; elBlist.innerHTML='<div class="lc2-empty">Не вдалося завантажити. Скористайтесь пошуком праворуч.</div>'; });
-    }
-    var bTimer=null;
-    function loadBrandModels(){
-      var brand=elBrand.value, q=elBinput.value;
-      elBlist.innerHTML='<div class="lc2-empty">Завантаження…</div>';
-      var p='/api/models?sku='+encodeURIComponent(SKU)+'&brand='+encodeURIComponent(brand);
-      if(norm(q).length>=MIN) p+='&q='+encodeURIComponent(q);
-      api(p).then(function(d){
-        if(d.tooMany){ elBlist.innerHTML='<div class="lc2-empty">Забагато моделей ('+d.cap+'+). Почніть вводити модель у поле вище, щоб звузити.</div>'; return; }
-        elBlist.innerHTML=listHtml(d.items||[], norm(q).length>=MIN?norm(q):'', false);
-      }).catch(function(){ elBlist.innerHTML='<div class="lc2-empty">Помилка завантаження.</div>'; });
-    }
+  function loadBrands(){
+    api('/api/brands?sku='+encodeURIComponent(SKU)).then(function(d){
+      var brands=d.brands||[], total=d.total|0;
+      setText(elTotal,'('+nModels(total)+')'); setText(elQcount,'('+nModels(total)+')');
+      if(!brands.length){ setHtml(elBrand,'<option>—</option>'); setHtml(elBlist,'<div class="lcw-empty">Список уточнюється.</div>'); return; }
+      setHtml(elBrand, brands.map(function(b){ return '<option value="'+esc(b.brand)+'">'+esc(b.brand||'Інші')+' ('+b.count+')</option>'; }).join(''));
+      loadBrandModels();
+    }).catch(function(){ setText(elTotal,''); setHtml(elBlist,'<div class="lcw-empty">Не вдалося завантажити. Скористайтесь пошуком праворуч.</div>'); });
+  }
+  var bTimer=null;
+  function loadBrandModels(){
+    if(!elBrand) return;
+    var brand=elBrand.value, qb=elBinput?elBinput.value:'';
+    setHtml(elBlist,'<div class="lcw-empty">Завантаження…</div>');
+    var pth='/api/models?sku='+encodeURIComponent(SKU)+'&brand='+encodeURIComponent(brand);
+    if(norm(qb).length>=MIN) pth+='&q='+encodeURIComponent(qb);
+    api(pth).then(function(d){
+      if(d.tooMany){ setHtml(elBlist,'<div class="lcw-empty">Забагато моделей ('+d.cap+'+). Почніть вводити модель у поле вище, щоб звузити.</div>'); return; }
+      setHtml(elBlist, '<ul style="list-style:none;margin:0;padding:0">'+listHtml(d.items||[], norm(qb).length>=MIN?norm(qb):'', false)+'</ul>');
+    }).catch(function(){ setHtml(elBlist,'<div class="lcw-empty">Помилка завантаження.</div>'); });
+  }
 
-    // ── Права колонка: швидкий пошук по всіх брендах ──
-    var qTimer=null,qLast='';
-    function onQuick(){
-      var raw=elQinput.value, qn=norm(raw);
-      if(qn===qLast) return; qLast=qn;
-      clearTimeout(qTimer);
-      if(qn.length<MIN){ elQresult.innerHTML = raw?'<div class="lc2-hint">Мінімум '+MIN+' символи.</div>':''; return; }
-      qTimer=setTimeout(function(){
-        elQresult.innerHTML='<div class="lc2-hint">Шукаю…</div>';
-        api('/api/models?sku='+encodeURIComponent(SKU)+'&q='+encodeURIComponent(raw)).then(function(d){
-          if(norm(elQinput.value)!==qn) return;
-          if(d.tooMany){ elQresult.innerHTML='<div class="lc2-banner info">Забагато збігів — уточніть запит.</div>'; return; }
-          var items=d.items||[];
-          if(!items.length){ elQresult.innerHTML='<div class="lc2-banner bad">✕ Моделі «'+esc(raw.trim())+'» немає у списку сумісних</div>'; return; }
-          elQresult.innerHTML='<div class="lc2-banner ok">✓ Підходить — знайдено ('+items.length+')</div>'
-            +'<ul class="lc2-list">'+listHtml(items,qn,true)+'</ul>';
-        }).catch(function(){ elQresult.innerHTML='<div class="lc2-hint">Не вдалося перевірити. Спробуйте ще.</div>'; });
-      },180);
-    }
+  var qTimer=null,qLast='';
+  function onQuick(){
+    var raw=elQinput.value, qn=norm(raw);
+    if(qn===qLast) return; qLast=qn; clearTimeout(qTimer);
+    if(qn.length<MIN){ setHtml(elQresult, raw?'<div class="lcw-hint">Мінімум '+MIN+' символи.</div>':''); return; }
+    qTimer=setTimeout(function(){
+      setHtml(elQresult,'<div class="lcw-hint">Шукаю…</div>');
+      api('/api/models?sku='+encodeURIComponent(SKU)+'&q='+encodeURIComponent(raw)).then(function(d){
+        if(norm(elQinput.value)!==qn) return;
+        if(d.tooMany){ setHtml(elQresult,'<div class="lcw-banner info">Забагато збігів — уточніть запит.</div>'); return; }
+        var items=d.items||[];
+        if(!items.length){ setHtml(elQresult,'<div class="lcw-banner bad">✕ Моделі «'+esc(raw.trim())+'» немає у списку сумісних</div>'); return; }
+        setHtml(elQresult,'<div class="lcw-banner ok">✓ Підходить — знайдено ('+items.length+')</div><ul class="lcw-list">'+listHtml(items,qn,true)+'</ul>');
+      }).catch(function(){ setHtml(elQresult,'<div class="lcw-hint">Не вдалося перевірити. Спробуйте ще.</div>'); });
+    },180);
+  }
 
-    elBrand.addEventListener('change', function(){ elBinput.value=''; loadBrandModels(); });
-    elBinput.addEventListener('input', function(){ clearTimeout(bTimer); bTimer=setTimeout(loadBrandModels,180); });
-    elQinput.addEventListener('input', onQuick);
-    loadBrands();
-  })();
-  </script>
-</div>
+  if(elBrand) elBrand.addEventListener('change', function(){ if(elBinput) elBinput.value=''; loadBrandModels(); });
+  if(elBinput) elBinput.addEventListener('input', function(){ clearTimeout(bTimer); bTimer=setTimeout(loadBrandModels,180); });
+  if(elQinput) elQinput.addEventListener('input', onQuick);
+  loadBrands();
+})();
+</script>
