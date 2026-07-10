@@ -70,7 +70,6 @@
     +  '<div>'
     +    '<label class="lcw-label">Виберіть бренд техніки</label>'
     +    '<select class="lcw-brand" aria-label="Бренд техніки"></select>'
-    +    '<div class="lcw-inwrap"><input class="lcw-input lcw-binput" type="search" autocomplete="off" spellcheck="false" placeholder="Введіть модель, щоб перевірити свою"></div>'
     +    '<div class="lcw-blist"></div>'
     +  '</div>'
     +  '<div>'
@@ -83,7 +82,7 @@
 
   var q = function(c){ return root.querySelector('.'+c); };
   var elTotal=q('lcw-total'), elQcount=q('lcw-qcount'), elBrand=q('lcw-brand'),
-      elBinput=q('lcw-binput'), elBlist=q('lcw-blist'), elQinput=q('lcw-qinput'), elQresult=q('lcw-qresult');
+      elBlist=q('lcw-blist'), elQinput=q('lcw-qinput'), elQresult=q('lcw-qresult');
   var setText=function(el,t){ if(el) el.textContent=t; };
   var setHtml=function(el,h){ if(el) el.innerHTML=h; };
 
@@ -112,28 +111,18 @@
       loadBrandModels();
     }).catch(function(){ setText(elTotal,''); setHtml(elBlist,'<div class="lcw-empty">Не вдалося завантажити. Скористайтесь пошуком праворуч.</div>'); });
   }
-  var bTimer=null;
   function loadBrandModels(){
     if(!elBrand) return;
-    var brand=elBrand.value, qb=elBinput?elBinput.value:'', searching=norm(qb).length>=MIN;
+    var brand=elBrand.value;
     setHtml(elBlist,'<div class="lcw-empty">Завантаження…</div>');
-    var pth='/api/models?sku='+encodeURIComponent(SKU)+'&brand='+encodeURIComponent(brand);
-    if(searching) pth+='&q='+encodeURIComponent(qb);
-    api(pth).then(function(d){
-      if(d.tooMany){ setHtml(elBlist,'<div class="lcw-empty">Забагато збігів — введіть більше символів моделі.</div>'); return; }
-      var items=d.items||[];
-      if(searching){
-        var ulS='<ul class="lcw-list">'+listHtml(items, norm(qb), false)+'</ul>';
-        setHtml(elBlist, items.length ? ulS : '<div class="lcw-empty">У цьому бренді моделі «'+esc(qb.trim())+'» немає.</div>');
-      } else {
-        // приклад: показуємо лише кілька (решта — тільки через пошук; повний список не відкриваємо)
-        var total=BRAND_COUNT[brand]!=null?BRAND_COUNT[brand]:items.length;
-        var shown=items.slice(0, PREVIEW);
-        var ulB='<ul class="lcw-list">'+listHtml(shown, '', false)+'</ul>';
-        var more=total-shown.length;
-        var note=more>0 ? '<div class="lcw-hint">Показано '+shown.length+' з '+nModels(total)+'. Введіть свою модель у поле вище, щоб перевірити.</div>' : '';
-        setHtml(elBlist, ulB+note);
-      }
+    api('/api/models?sku='+encodeURIComponent(SKU)+'&brand='+encodeURIComponent(brand)).then(function(d){
+      // показуємо лише кілька моделей як приклад; повний список не відкриваємо (решта — через пошук праворуч)
+      var items=(d.items||[]).slice(0, PREVIEW);
+      var total=BRAND_COUNT[brand]!=null?BRAND_COUNT[brand]:items.length;
+      var more=total-items.length;
+      var ul='<ul class="lcw-list">'+listHtml(items, '', false)+'</ul>';
+      var note=more>0 ? '<div class="lcw-hint">Показано '+items.length+' з '+nModels(total)+'. Щоб перевірити свою модель — скористайтесь пошуком праворуч.</div>' : '';
+      setHtml(elBlist, ul+note);
     }).catch(function(){ setHtml(elBlist,'<div class="lcw-empty">Помилка завантаження.</div>'); });
   }
 
@@ -149,13 +138,12 @@
         if(d.tooMany){ setHtml(elQresult,'<div class="lcw-banner info">Забагато збігів — уточніть запит.</div>'); return; }
         var items=d.items||[];
         if(!items.length){ setHtml(elQresult,'<div class="lcw-banner bad">✕ Моделі «'+esc(raw.trim())+'» немає у списку сумісних</div>'); return; }
-        setHtml(elQresult,'<div class="lcw-banner ok">✓ Підходить — знайдено ('+items.length+')</div><ul class="lcw-list">'+listHtml(items,qn,true)+'</ul>');
+        setHtml(elQresult,'<div class="lcw-banner ok">✓ Підходить до вашого приладу</div><ul class="lcw-list">'+listHtml(items,qn,true)+'</ul>');
       }).catch(function(){ setHtml(elQresult,'<div class="lcw-hint">Не вдалося перевірити. Спробуйте ще.</div>'); });
     },180);
   }
 
-  if(elBrand) elBrand.addEventListener('change', function(){ if(elBinput) elBinput.value=''; loadBrandModels(); });
-  if(elBinput) elBinput.addEventListener('input', function(){ clearTimeout(bTimer); bTimer=setTimeout(loadBrandModels,180); });
+  if(elBrand) elBrand.addEventListener('change', loadBrandModels);
   if(elQinput) elQinput.addEventListener('input', onQuick);
   loadBrands();
 })();
