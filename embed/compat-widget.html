@@ -185,18 +185,38 @@
       loadBrandModels();
     }).catch(function(){ setText(elTotal,''); setHtml(elBlist,'<div class="lcw-empty">'+T.loadFail+'</div>'); });
   }
+  var bState={brand:null,loaded:0,cap:0,total:0,busy:false,done:false};
+  function bNote(){
+    var n=elBlist?elBlist.querySelector('.lcw-hint'):null;
+    if(n) n.textContent=T.shownOf(bState.loaded, nModels(bState.total));
+  }
+  function bFetch(){
+    if(bState.busy||bState.done) return;
+    bState.busy=true;
+    var brand=bState.brand;
+    api('/api/models?sku='+encodeURIComponent(SKU)+'&brand='+encodeURIComponent(brand)+'&offset='+bState.loaded).then(function(d){
+      if(brand!==bState.brand) return;
+      var items=d.items||[];
+      bState.total=d.total!=null?d.total:bState.total;
+      bState.cap=d.cap!=null?d.cap:bState.cap;
+      var ul=elBlist.querySelector('.lcw-list');
+      if(ul&&items.length) ul.insertAdjacentHTML('beforeend', listHtml(items,''));
+      bState.loaded+=items.length;
+      if(!items.length||bState.loaded>=bState.cap) bState.done=true;
+      bNote();
+    }).catch(function(){ bState.done=true; })
+      .then(function(){ bState.busy=false; });
+  }
   function loadBrandModels(){
     if(!elBrand) return;
     var brand=elBrand.value;
-    setHtml(elBlist,'<div class="lcw-empty">'+T.loading+'</div>');
-    api('/api/models?sku='+encodeURIComponent(SKU)+'&brand='+encodeURIComponent(brand)).then(function(d){
-      var items=(d.items||[]).slice(0, PREVIEW);
-      var total=BRAND_COUNT[brand]!=null?BRAND_COUNT[brand]:items.length;
-      var more=total-items.length;
-      var ul='<ul class="lcw-list">'+listHtml(items, '')+'</ul>';
-      var note=more>0 ? '<div class="lcw-hint">'+T.shownOf(items.length, nModels(total))+'</div>' : '';
-      setHtml(elBlist, ul+note);
-    }).catch(function(){ setHtml(elBlist,'<div class="lcw-empty">'+T.loadErr+'</div>'); });
+    bState={brand:brand,loaded:0,cap:1,total:0,busy:false,done:false};
+    setHtml(elBlist,'<ul class="lcw-list"></ul><div class="lcw-hint"></div>');
+    var ul=elBlist.querySelector('.lcw-list');
+    ul.addEventListener('scroll', function(){
+      if(ul.scrollTop+ul.clientHeight>=ul.scrollHeight-60) bFetch();
+    });
+    bFetch();
   }
 
   var qTimer=null,qLast='';

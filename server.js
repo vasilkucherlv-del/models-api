@@ -11,7 +11,8 @@ const { parseTables } = require('./table-parser');
 const PORT = process.env.PORT || 3000;
 const MIN_CHARS = parseInt(process.env.MIN_CHARS || '3', 10);     // мінімум символів для пошуку
 const RESULT_CAP = parseInt(process.env.RESULT_CAP || '40', 10);     // стеля видачі пошуку (більше → "уточніть")
-const BROWSE_PREVIEW = parseInt(process.env.BROWSE_PREVIEW || '8', 10); // скільки моделей бренду показувати як приклад (решта — лише через пошук)
+const BROWSE_PAGE = parseInt(process.env.BROWSE_PAGE || '20', 10);      // порція довантаження списку бренду при прокрутці
+const BROWSE_RATIO = parseFloat(process.env.BROWSE_RATIO || '0.6');     // частка списку бренду, доступна для перегляду (решта — лише через пошук)
 const PREVIEW_LIMIT = parseInt(process.env.PREVIEW_LIMIT || '12', 10);
 const FEED_URL = process.env.FEED_URL ||
   'https://www.lartek.com.ua/content/export/def50f4a67a9cdf49099014837c8ba76.xml';
@@ -119,16 +120,25 @@ app.get('/api/models', limiter, async (req, res) => {
     // пошук збігається за моделлю АБО за індустріальним кодом
     if (q.length >= MIN_CHARS) { params.push(q); where += ` AND (model_norm LIKE '%' || $${params.length} || '%' OR code_norm LIKE '%' || $${params.length} || '%')`; }
 
-    // Перегляд бренду без запиту → лише КІЛЬКА моделей (приклад).
-    // Повний список у браузер не потрапляє — його не можна проглянути/скопіювати.
+    // Перегляд бренду без запиту → посторінково (довантаження при прокрутці),
+    // але сервер віддає максимум BROWSE_RATIO (60%) списку бренду — решту
+    // неможливо витягти навіть технічно, лише через пошук.
     const isBrowse = hasBrand && q.length < MIN_CHARS;
     if (isBrowse) {
-      params.push(BROWSE_PREVIEW);
+      const cnt = await pool.query(
+        `SELECT COUNT(*)::int AS n FROM compatibility WHERE ${where}`, params
+      );
+      const total = cnt.rows[0].n;
+      const cap = Math.ceil(total * BROWSE_RATIO);
+      let offset = parseInt(req.query.offset || '0', 10);
+      if (!(offset >= 0)) offset = 0;
+      if (offset >= cap) return res.json({ items: [], total, cap, offset });
+      const limit = Math.min(BROWSE_PAGE, cap - offset);
       const { rows } = await pool.query(
-        `SELECT brand, model, code FROM compatibility WHERE ${where} ORDER BY model LIMIT $${params.length}`,
+        `SELECT brand, model, code FROM compatibility WHERE ${where} ORDER BY model LIMIT ${limit} OFFSET ${offset}`,
         params
       );
-      return res.json({ items: rows, preview: true });
+      return res.json({ items: rows, total, cap, offset });
     }
 
     // Пошук: беремо на 1 більше за стелю, щоб зрозуміти, чи збігів забагато.
