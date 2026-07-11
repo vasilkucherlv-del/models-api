@@ -147,12 +147,29 @@
     var at=nm.indexOf(qn); if(at<0) return s; var f=map[at],t=map[at+qn.length-1];
     return esc(model.slice(0,f))+'<mark>'+esc(model.slice(f,t+1))+'</mark>'+esc(model.slice(t+1)); }
   var SEARCH_BASE=(isRu?'/ru':'')+'/katalog/search/?q=';
+  var SITE_INPUT='input.search__input, #search-input, .search__field input, .search input[type=text], .search input[type=search]';
+  function openSiteSearch(model){
+    var inp=document.querySelector(SITE_INPUT);
+    if(inp){
+      inp.value=model;
+      try{ inp.dispatchEvent(new FocusEvent('focusin',{bubbles:true})); }catch(e){ inp.focus(); }
+      try{ inp.dispatchEvent(new Event('input',{bubbles:true})); }catch(e){}
+      return true;
+    }
+    return false;
+  }
   function li(it,qn){
     var b=it.brand?'<span class="lcw-brand">'+esc(it.brand)+' </span>':'';
-    var main='<a class="lcw-mlink" href="'+SEARCH_BASE+encodeURIComponent(it.model)+'" title="'+(isRu?'Показать все запчасти для этой модели':'Показати всі запчастини для цієї моделі')+'"><span class="lcw-model">'+b+hi(it.model,qn)+'</span></a>';
+    var main='<a class="lcw-mlink" href="'+SEARCH_BASE+encodeURIComponent(it.model)+'" data-model="'+esc(it.model)+'" title="'+(isRu?'Показать все запчасти для этой модели':'Показати всі запчастини для цієї моделі')+'"><span class="lcw-model">'+b+hi(it.model,qn)+'</span></a>';
     var code=it.code?'<span class="lcw-code">'+hi(it.code,qn)+'</span>':'';
     return '<li><span class="lcw-cell">'+main+code+'</span><span class="lcw-check">✓</span></li>';
   }
+  root.addEventListener('click', function(e){
+    var a=e.target && e.target.closest ? e.target.closest('a.lcw-mlink') : null;
+    if(!a) return;
+    var model=a.getAttribute('data-model')||'';
+    if(model && openSiteSearch(model)){ e.preventDefault(); }
+  });
   function listHtml(items,qn){ return items.length ? items.map(function(it){return li(it,qn);}).join('') : '<div class="lcw-empty">—</div>'; }
 
   if(!API || !SKU){ setText(elTotal,'(no data-api / data-sku)'); return; }
