@@ -26,9 +26,7 @@
 
   var API = (root.getAttribute('data-api')||'').replace(/\/+$/,'');
   var SKU = (root.getAttribute('data-sku')||'').trim();
-  if(!SKU){ var _m=document.querySelector('meta[itemprop="sku"]'); SKU=_m?String(_m.getAttribute('content')||'').trim():''; }  // авто-артикул зі сторінки
-
-  // Сховати вкладку «Сумісні моделі», якщо у товару немає сумісних моделей.
+  if(!SKU){ var _m=document.querySelector('meta[itemprop="sku"]'); SKU=_m?String(_m.getAttribute('content')||'').trim():''; }
   function hideTab(){
     var panel = root.closest ? root.closest('[data-content-id]') : null;
     if(panel){
@@ -41,7 +39,6 @@
   var MIN = parseInt(root.getAttribute('data-min')||'3',10);
   var PREVIEW = parseInt(root.getAttribute('data-preview')||'8',10);
 
-  // Мова: /ru/ у шляху → російська, інакше українська.
   var isRu = /^\/ru(\/|$)/.test(location.pathname);
   var T = isRu ? {
     title:'Подходит к моделям:', brandLabel:'Выберите бренд техники',
@@ -134,7 +131,7 @@
   var setHtml=function(el,h){ if(el) el.innerHTML=h; };
 
   function norm(s){ return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,''); }
-  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){ return '&#'+c.charCodeAt(0)+';'; }); }
   function api(path){ return fetch(API+path,{headers:{'Accept':'application/json'}}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }); }
   function plural(n,f){ var a=n%10,b=n%100; return (a===1&&b!==11)?f[0]:(a>=2&&a<=4&&(b<10||b>=20))?f[1]:f[2]; }
   function nModels(n){ return n+' '+plural(n,T.forms); }
@@ -157,7 +154,7 @@
     api('/api/brands?sku='+encodeURIComponent(SKU)).then(function(d){
       var brands=d.brands||[], total=d.total|0;
       setText(elTotal,'('+nModels(total)+')'); setText(elQcount,'('+nModels(total)+')');
-      if(!brands.length || total<=0){ hideTab(); return; }   // немає моделей → ховаємо вкладку
+      if(!brands.length || total<=0){ hideTab(); return; }
       brands.forEach(function(b){ BRAND_COUNT[b.brand]=b.count; });
       setHtml(elBrand, brands.map(function(b){ return '<option value="'+esc(b.brand)+'">'+esc(b.brand||T.other)+' ('+b.count+')</option>'; }).join(''));
       loadBrandModels();
@@ -189,7 +186,6 @@
         if(d.tooMany){ setHtml(elQresult,'<div class="lcw-banner info">'+T.tooMany+'</div>'); return; }
         var items=d.items||[];
         if(!items.length){ setHtml(elQresult,'<div class="lcw-banner bad">'+T.notFound(esc(raw.trim()))+'</div>'); return; }
-        // ТОЧНИЙ збіг: усі символи мають сходитись (за моделлю АБО за індустр. кодом).
         var exact = items.filter(function(it){ return norm(it.model)===qn || (it.code && norm(it.code)===qn); });
         if(exact.length){
           setHtml(elQresult,'<div class="lcw-banner ok">'+T.fits+'</div><ul class="lcw-list">'+listHtml(exact,qn)+'</ul>');
