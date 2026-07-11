@@ -188,7 +188,7 @@
         if(!items.length){ setHtml(elQresult,'<div class="lcw-banner bad">'+T.notFound(esc(raw.trim()))+'</div>'); return; }
         var exact = items.filter(function(it){ return norm(it.model)===qn || (it.code && norm(it.code)===qn); });
         if(exact.length){
-          setHtml(elQresult,'<div class="lcw-banner ok">'+T.fits+'</div><ul class="lcw-list">'+listHtml(exact,qn)+'</ul>');
+          setHtml(elQresult,'<div class="lcw-banner ok">'+T.fits+'</div>');
         } else {
           setHtml(elQresult,'<div class="lcw-banner warn">'+T.incTitle+'</div><div class="lcw-hint">'+T.incHint+'</div>');
         }
