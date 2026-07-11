@@ -92,6 +92,9 @@
     +'.lcw-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;font-size:14px;border-top:1px solid #eef1f4}'
     +'.lcw-list li:first-child{border-top:0}'
     +'.lcw-model{font-weight:600}'
+    +'.lcw-mlink{color:inherit;text-decoration:none}'
+    +'.lcw-mlink .lcw-model{border-bottom:1px dashed #b6bcc4}'
+    +'.lcw-mlink:hover .lcw-model{color:#2563eb;border-bottom-color:#2563eb}'
     +'.lcw-cell{display:flex;flex-direction:column;gap:1px}'
     +'.lcw-code{font-size:12px;color:var(--mut);font-family:"SFMono-Regular",Consolas,monospace}'
     +'.lcw-brand{color:var(--mut);font-weight:400;margin-right:6px}'
@@ -143,9 +146,10 @@
     var nm='',map=[]; for(var i=0;i<model.length;i++){var c=model[i].toUpperCase(); if(/[A-Z0-9]/.test(c)){nm+=c;map.push(i);}}
     var at=nm.indexOf(qn); if(at<0) return s; var f=map[at],t=map[at+qn.length-1];
     return esc(model.slice(0,f))+'<mark>'+esc(model.slice(f,t+1))+'</mark>'+esc(model.slice(t+1)); }
+  var SEARCH_BASE=(isRu?'/ru':'')+'/katalog/search/?q=';
   function li(it,qn){
     var b=it.brand?'<span class="lcw-brand">'+esc(it.brand)+' </span>':'';
-    var main='<span class="lcw-model">'+b+hi(it.model,qn)+'</span>';
+    var main='<a class="lcw-mlink" href="'+SEARCH_BASE+encodeURIComponent(it.model)+'" title="'+(isRu?'Показать все запчасти для этой модели':'Показати всі запчастини для цієї моделі')+'"><span class="lcw-model">'+b+hi(it.model,qn)+'</span></a>';
     var code=it.code?'<span class="lcw-code">'+hi(it.code,qn)+'</span>':'';
     return '<li><span class="lcw-cell">'+main+code+'</span><span class="lcw-check">✓</span></li>';
   }
