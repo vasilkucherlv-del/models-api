@@ -35,11 +35,27 @@ function parseTables(descHtml) {
     const header = cellsOf(rows[0]);
     const roles = header.map(roleOf);
     if (roles.indexOf('model') < 0) continue;               // не таблиця сумісності
-    const bpos = roles.map((r, i) => (r === 'brand' ? i : -1)).filter(i => i >= 0);
-    const G = bpos.length >= 2 ? bpos[1] - bpos[0] : roles.length;
-    const start = bpos.length ? bpos[0] : 0;
-    const unit = roles.slice(start, start + G);
+    let bpos = roles.map((r, i) => (r === 'brand' ? i : -1)).filter(i => i >= 0);
+    let G = bpos.length >= 2 ? bpos[1] - bpos[0] : roles.length;
+    let start = bpos.length ? bpos[0] : 0;
+    let unit = roles.slice(start, start + G);
     if (!unit.length) unit.push('model');
+
+    // Корекція за ДАНИМИ: заголовок буває «Модель|Модель|…», а в рядках пари Бренд+Модель.
+    // Якщо бренду в заголовку немає, а перший рядок чергує «слово без цифр» / «код із цифрою» —
+    // трактуємо як пари [brand, model].
+    if (bpos.length === 0 && rows.length > 1) {
+      const probe = cellsOf(rows[1]).filter(c => c !== '');
+      const brandLike = s => s && !/\d/.test(s) && /^[A-Za-zА-Яа-яЇІЄҐїієґё&.\- ]+$/.test(s);
+      const modelLike = s => s && /\d/.test(s);
+      if (probe.length >= 2 && probe.length % 2 === 0) {
+        let paired = true;
+        for (let j = 0; j < probe.length; j += 2) {
+          if (!brandLike(probe[j]) || !modelLike(probe[j + 1])) { paired = false; break; }
+        }
+        if (paired) { G = 2; start = 0; unit = ['brand', 'model']; }
+      }
+    }
     for (let ri = 1; ri < rows.length; ri++) {
       const cs = cellsOf(rows[ri]);
       for (let k = 0; k < cs.length; k += G) {

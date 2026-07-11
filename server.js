@@ -11,8 +11,9 @@ const { parseTables } = require('./table-parser');
 const PORT = process.env.PORT || 3000;
 const MIN_CHARS = parseInt(process.env.MIN_CHARS || '3', 10);     // мінімум символів для пошуку
 const RESULT_CAP = parseInt(process.env.RESULT_CAP || '40', 10);     // стеля видачі пошуку (більше → "уточніть")
-const BROWSE_PAGE = parseInt(process.env.BROWSE_PAGE || '20', 10);      // порція довантаження списку бренду при прокрутці
+const BROWSE_PAGE = parseInt(process.env.BROWSE_PAGE || '100', 10);     // порція довантаження списку бренду при прокрутці
 const BROWSE_RATIO = parseFloat(process.env.BROWSE_RATIO || '0.6');     // частка списку бренду, доступна для перегляду (решта — лише через пошук)
+const BROWSE_MAX = parseInt(process.env.BROWSE_MAX || '500', 10);       // абсолютна стеля рядків перегляду (щоб не роздувати сторінку)
 const PREVIEW_LIMIT = parseInt(process.env.PREVIEW_LIMIT || '12', 10);
 const FEED_URL = process.env.FEED_URL ||
   'https://www.lartek.com.ua/content/export/def50f4a67a9cdf49099014837c8ba76.xml';
@@ -129,9 +130,10 @@ app.get('/api/models', limiter, async (req, res) => {
         `SELECT COUNT(*)::int AS n FROM compatibility WHERE ${where}`, params
       );
       const total = cnt.rows[0].n;
-      const cap = Math.ceil(total * BROWSE_RATIO);
+      const cap = Math.min(Math.ceil(total * BROWSE_RATIO), BROWSE_MAX);
       let offset = parseInt(req.query.offset || '0', 10);
       if (!(offset >= 0)) offset = 0;
+      res.set('Cache-Control', 'public, max-age=300');   // повторні перегляди — з кешу, без бази
       if (offset >= cap) return res.json({ items: [], total, cap, offset });
       const limit = Math.min(BROWSE_PAGE, cap - offset);
       const { rows } = await pool.query(
