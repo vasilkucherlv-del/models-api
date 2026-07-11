@@ -82,7 +82,11 @@
     +'.lcw-inwrap{position:relative;margin:8px 0}'
     +'.lcw-ico{position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:.5;font-size:14px}'
     +'.lcw select,.lcw-input{width:100%;box-sizing:border-box;font-size:15px;padding:11px 12px;border:1px solid var(--bd);border-radius:8px;background:#fff;outline:none;font-family:inherit}'
-    +'.lcw-input--ico{padding-left:36px}'
+    +'.lcw-input--ico{padding-left:36px;padding-right:36px}'
+    +'.lcw-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);cursor:pointer;color:#9aa1a9;font-size:22px;line-height:1;display:none;padding:0 4px}'
+    +'.lcw-clear:hover{color:#1f2328}'
+    +'.lcw-clear.show{display:block}'
+    +'.lcw-qinput::-webkit-search-cancel-button{display:none}'
     +'.lcw select:focus,.lcw-input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.15)}'
     +'.lcw-list{list-style:none;margin:8px 0 0;padding:0;max-height:320px;overflow-y:auto;border:1px solid var(--bd);border-radius:8px}'
     +'.lcw-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;font-size:14px;border-top:1px solid #eef1f4}'
@@ -118,7 +122,7 @@
     +  '</div>'
     +  '<div>'
     +    '<div class="lcw-label">'+T.quickLabel+' <span class="lcw-mut lcw-qcount"></span></div>'
-    +    '<div class="lcw-inwrap"><span class="lcw-ico">🔍</span><input class="lcw-input lcw-input--ico lcw-qinput" type="search" autocomplete="off" spellcheck="false" placeholder="'+T.qph+'"></div>'
+    +    '<div class="lcw-inwrap"><span class="lcw-ico">🔍</span><input class="lcw-input lcw-input--ico lcw-qinput" type="search" autocomplete="off" spellcheck="false" placeholder="'+T.qph+'"><span class="lcw-clear lcw-qclear" role="button" aria-label="Очистити">×</span></div>'
     +    '<div class="lcw-result lcw-qresult"></div>'
     +    '<div class="lcw-help">'+T.help+'</div>'
     +  '</div>'
@@ -126,7 +130,7 @@
 
   var q = function(c){ return root.querySelector('.'+c); };
   var elTotal=q('lcw-total'), elQcount=q('lcw-qcount'), elBrand=q('lcw-brand'),
-      elBlist=q('lcw-blist'), elQinput=q('lcw-qinput'), elQresult=q('lcw-qresult');
+      elBlist=q('lcw-blist'), elQinput=q('lcw-qinput'), elQresult=q('lcw-qresult'), elQclear=q('lcw-qclear');
   var setText=function(el,t){ if(el) el.textContent=t; };
   var setHtml=function(el,h){ if(el) el.innerHTML=h; };
 
@@ -177,6 +181,7 @@
   var qTimer=null,qLast='';
   function onQuick(){
     var raw=elQinput.value, qn=norm(raw);
+    if(elQclear) elQclear.classList.toggle('show', !!raw);
     if(qn===qLast) return; qLast=qn; clearTimeout(qTimer);
     if(qn.length<MIN){ setHtml(elQresult, raw?'<div class="lcw-hint">'+T.minChars(MIN)+'</div>':''); return; }
     qTimer=setTimeout(function(){
@@ -198,6 +203,7 @@
 
   if(elBrand) elBrand.addEventListener('change', loadBrandModels);
   if(elQinput) elQinput.addEventListener('input', onQuick);
+  if(elQclear) elQclear.addEventListener('click', function(){ elQinput.value=''; qLast=''; elQclear.classList.remove('show'); setHtml(elQresult,''); elQinput.focus(); });
   loadBrands();
 })();
 </script>
