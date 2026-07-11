@@ -26,9 +26,7 @@
 
   var API = (root.getAttribute('data-api')||'').replace(/\/+$/,'');
   var SKU = (root.getAttribute('data-sku')||'').trim();
-  if(!SKU){ var _m=document.querySelector('meta[itemprop="sku"]'); SKU=_m?String(_m.getAttribute('content')||'').trim():''; }  // авто-артикул зі сторінки
-
-  // Сховати вкладку «Сумісні моделі», якщо у товару немає сумісних моделей.
+  if(!SKU){ var _m=document.querySelector('meta[itemprop="sku"]'); SKU=_m?String(_m.getAttribute('content')||'').trim():''; }
   function hideTab(){
     var panel = root.closest ? root.closest('[data-content-id]') : null;
     if(panel){
@@ -41,7 +39,6 @@
   var MIN = parseInt(root.getAttribute('data-min')||'3',10);
   var PREVIEW = parseInt(root.getAttribute('data-preview')||'8',10);
 
-  // Мова: /ru/ у шляху → російська, інакше українська.
   var isRu = /^\/ru(\/|$)/.test(location.pathname);
   var T = isRu ? {
     title:'Подходит к моделям:', brandLabel:'Выберите бренд техники',
@@ -85,7 +82,11 @@
     +'.lcw-inwrap{position:relative;margin:8px 0}'
     +'.lcw-ico{position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:.5;font-size:14px}'
     +'.lcw select,.lcw-input{width:100%;box-sizing:border-box;font-size:15px;padding:11px 12px;border:1px solid var(--bd);border-radius:8px;background:#fff;outline:none;font-family:inherit}'
-    +'.lcw-input--ico{padding-left:36px}'
+    +'.lcw-input--ico{padding-left:36px;padding-right:36px}'
+    +'.lcw-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);cursor:pointer;color:#9aa1a9;font-size:22px;line-height:1;display:none;padding:0 4px}'
+    +'.lcw-clear:hover{color:#1f2328}'
+    +'.lcw-clear.show{display:block}'
+    +'.lcw-qinput::-webkit-search-cancel-button{display:none}'
     +'.lcw select:focus,.lcw-input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.15)}'
     +'.lcw-list{list-style:none;margin:8px 0 0;padding:0;max-height:320px;overflow-y:auto;border:1px solid var(--bd);border-radius:8px}'
     +'.lcw-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;font-size:14px;border-top:1px solid #eef1f4}'
@@ -121,7 +122,7 @@
     +  '</div>'
     +  '<div>'
     +    '<div class="lcw-label">'+T.quickLabel+' <span class="lcw-mut lcw-qcount"></span></div>'
-    +    '<div class="lcw-inwrap"><span class="lcw-ico">🔍</span><input class="lcw-input lcw-input--ico lcw-qinput" type="search" autocomplete="off" spellcheck="false" placeholder="'+T.qph+'"></div>'
+    +    '<div class="lcw-inwrap"><span class="lcw-ico">🔍</span><input class="lcw-input lcw-input--ico lcw-qinput" type="search" autocomplete="off" spellcheck="false" placeholder="'+T.qph+'"><span class="lcw-clear lcw-qclear" role="button" aria-label="Очистити">×</span></div>'
     +    '<div class="lcw-result lcw-qresult"></div>'
     +    '<div class="lcw-help">'+T.help+'</div>'
     +  '</div>'
@@ -129,12 +130,12 @@
 
   var q = function(c){ return root.querySelector('.'+c); };
   var elTotal=q('lcw-total'), elQcount=q('lcw-qcount'), elBrand=q('lcw-brand'),
-      elBlist=q('lcw-blist'), elQinput=q('lcw-qinput'), elQresult=q('lcw-qresult');
+      elBlist=q('lcw-blist'), elQinput=q('lcw-qinput'), elQresult=q('lcw-qresult'), elQclear=q('lcw-qclear');
   var setText=function(el,t){ if(el) el.textContent=t; };
   var setHtml=function(el,h){ if(el) el.innerHTML=h; };
 
   function norm(s){ return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,''); }
-  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){ return '&#'+c.charCodeAt(0)+';'; }); }
   function api(path){ return fetch(API+path,{headers:{'Accept':'application/json'}}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }); }
   function plural(n,f){ var a=n%10,b=n%100; return (a===1&&b!==11)?f[0]:(a>=2&&a<=4&&(b<10||b>=20))?f[1]:f[2]; }
   function nModels(n){ return n+' '+plural(n,T.forms); }
@@ -157,7 +158,7 @@
     api('/api/brands?sku='+encodeURIComponent(SKU)).then(function(d){
       var brands=d.brands||[], total=d.total|0;
       setText(elTotal,'('+nModels(total)+')'); setText(elQcount,'('+nModels(total)+')');
-      if(!brands.length || total<=0){ hideTab(); return; }   // немає моделей → ховаємо вкладку
+      if(!brands.length || total<=0){ hideTab(); return; }
       brands.forEach(function(b){ BRAND_COUNT[b.brand]=b.count; });
       setHtml(elBrand, brands.map(function(b){ return '<option value="'+esc(b.brand)+'">'+esc(b.brand||T.other)+' ('+b.count+')</option>'; }).join(''));
       loadBrandModels();
@@ -180,6 +181,7 @@
   var qTimer=null,qLast='';
   function onQuick(){
     var raw=elQinput.value, qn=norm(raw);
+    if(elQclear) elQclear.classList.toggle('show', !!raw);
     if(qn===qLast) return; qLast=qn; clearTimeout(qTimer);
     if(qn.length<MIN){ setHtml(elQresult, raw?'<div class="lcw-hint">'+T.minChars(MIN)+'</div>':''); return; }
     qTimer=setTimeout(function(){
@@ -189,10 +191,9 @@
         if(d.tooMany){ setHtml(elQresult,'<div class="lcw-banner info">'+T.tooMany+'</div>'); return; }
         var items=d.items||[];
         if(!items.length){ setHtml(elQresult,'<div class="lcw-banner bad">'+T.notFound(esc(raw.trim()))+'</div>'); return; }
-        // ТОЧНИЙ збіг: усі символи мають сходитись (за моделлю АБО за індустр. кодом).
         var exact = items.filter(function(it){ return norm(it.model)===qn || (it.code && norm(it.code)===qn); });
         if(exact.length){
-          setHtml(elQresult,'<div class="lcw-banner ok">'+T.fits+'</div><ul class="lcw-list">'+listHtml(exact,qn)+'</ul>');
+          setHtml(elQresult,'<div class="lcw-banner ok">'+T.fits+'</div>');
         } else {
           setHtml(elQresult,'<div class="lcw-banner warn">'+T.incTitle+'</div><div class="lcw-hint">'+T.incHint+'</div>');
         }
@@ -202,6 +203,7 @@
 
   if(elBrand) elBrand.addEventListener('change', loadBrandModels);
   if(elQinput) elQinput.addEventListener('input', onQuick);
+  if(elQclear) elQclear.addEventListener('click', function(){ elQinput.value=''; qLast=''; elQclear.classList.remove('show'); setHtml(elQresult,''); elQinput.focus(); });
   loadBrands();
 })();
 </script>

@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const fs = require('fs');
+const path = require('path');
 const { pool, norm, init } = require('./db');
 const { parseFeed } = require('./import-feed');
 const { parseTables } = require('./table-parser');
@@ -41,6 +43,39 @@ const limiter = rateLimit({
 });
 
 app.get('/health', (req, res) => res.send('ok'));
+
+// === Один файл коду блоку (щоб у товарах був лише крихітний рядок) ===
+// Товар містить: <div class="lartek-compat-mount"></div><script src=".../widget.js" defer></script>
+// Майбутні зміни вигляду — правимо compat-widget.html, і оновлюється на всіх товарах без імпорту.
+let _widgetBody = null;
+function widgetBody() {
+  if (_widgetBody) return _widgetBody;
+  const html = fs.readFileSync(path.join(__dirname, 'embed', 'compat-widget.html'), 'utf8');
+  const m = html.match(/<script>([\s\S]*)<\/script>/);
+  const full = m[1];
+  const marker = "root.dataset.lcInit = '1';";
+  const bi = full.indexOf(marker) + marker.length;
+  const ei = full.lastIndexOf('})();');
+  let body = full.slice(bi, ei).replace("(root.getAttribute('data-api')||'')", "(root.getAttribute('data-api')||API_DEFAULT)");
+  _widgetBody = body;
+  return body;
+}
+app.get('/widget.js', (req, res) => {
+  try {
+    const origin = (req.get('x-forwarded-proto') || req.protocol) + '://' + req.get('host');
+    const js = '(function(){var API_DEFAULT=' + JSON.stringify(origin) + ';'
+      + 'function run(root){root.dataset.lcInit=\'1\';' + widgetBody() + '}'
+      + 'function boot(){var ms=document.querySelectorAll(\'.lartek-compat-mount\');for(var i=0;i<ms.length;i++){if(!ms[i].dataset.lcInit)run(ms[i]);}}'
+      + 'if(document.readyState===\'loading\')document.addEventListener(\'DOMContentLoaded\',boot);else boot();})();';
+    res.set('Content-Type', 'application/javascript; charset=utf-8');
+    res.set('Cache-Control', 'public, max-age=300');
+    res.set('Access-Control-Allow-Origin', '*');
+    res.send(js);
+  } catch (e) {
+    console.error(e);
+    res.status(500).send('// widget error');
+  }
+});
 
 // === Бренди товару + кількість моделей (для випадайки зліва) ===
 // GET /api/brands?sku=DEMO123 → { total, brands:[{brand,count}] }
