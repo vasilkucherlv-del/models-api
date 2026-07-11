@@ -4,6 +4,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const { pool, norm, init } = require('./db');
 const { parseFeed } = require('./import-feed');
+const { parseTables } = require('./table-parser');
 
 const PORT = process.env.PORT || 3000;
 const MIN_CHARS = parseInt(process.env.MIN_CHARS || '3', 10);     // мінімум символів для пошуку
@@ -80,7 +81,8 @@ app.get('/api/models', limiter, async (req, res) => {
     const params = [sku];
     let where = 'sku = $1';
     if (hasBrand) { params.push(brand); where += ` AND brand = $${params.length}`; }
-    if (q.length >= MIN_CHARS) { params.push(q); where += ` AND model_norm LIKE '%' || $${params.length} || '%'`; }
+    // пошук збігається за моделлю АБО за індустріальним кодом
+    if (q.length >= MIN_CHARS) { params.push(q); where += ` AND (model_norm LIKE '%' || $${params.length} || '%' OR code_norm LIKE '%' || $${params.length} || '%')`; }
 
     // Перегляд бренду без запиту → лише КІЛЬКА моделей (приклад).
     // Повний список у браузер не потрапляє — його не можна проглянути/скопіювати.
@@ -88,7 +90,7 @@ app.get('/api/models', limiter, async (req, res) => {
     if (isBrowse) {
       params.push(BROWSE_PREVIEW);
       const { rows } = await pool.query(
-        `SELECT brand, model FROM compatibility WHERE ${where} ORDER BY model LIMIT $${params.length}`,
+        `SELECT brand, model, code FROM compatibility WHERE ${where} ORDER BY model LIMIT $${params.length}`,
         params
       );
       return res.json({ items: rows, preview: true });
@@ -97,7 +99,7 @@ app.get('/api/models', limiter, async (req, res) => {
     // Пошук: беремо на 1 більше за стелю, щоб зрозуміти, чи збігів забагато.
     params.push(RESULT_CAP + 1);
     const { rows } = await pool.query(
-      `SELECT brand, model FROM compatibility WHERE ${where} ORDER BY model LIMIT $${params.length}`,
+      `SELECT brand, model, code FROM compatibility WHERE ${where} ORDER BY model LIMIT $${params.length}`,
       params
     );
     if (rows.length > RESULT_CAP) return res.json({ tooMany: true, cap: RESULT_CAP });
@@ -142,25 +144,19 @@ app.post('/api/import', async (req, res) => {
   const replace = req.body.replace === true;
   if (!sku || !models) return res.status(400).json({ error: 'sku_and_models_required' });
 
+  const rows = [];
+  for (const m of models) {
+    const model = String(m.model || '').trim();
+    const mn = norm(model);
+    if (!mn) continue;                       // бренд може бути порожнім
+    rows.push({ sku, brand: String(m.brand || '').trim(), model, model_norm: mn, code: String(m.code || '').trim() });
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     if (replace) await client.query('DELETE FROM compatibility WHERE sku = $1', [sku]);
-    let n = 0;
-    for (const m of models) {
-      const brand = String(m.brand || '').trim();
-      const model = String(m.model || '').trim();
-      const mn = norm(model);
-      if (!brand || !mn) continue;
-      await client.query(
-        `INSERT INTO compatibility (sku, brand, model, model_norm)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (sku, model_norm)
-         DO UPDATE SET brand = EXCLUDED.brand, model = EXCLUDED.model`,
-        [sku, brand, model, mn]
-      );
-      n++;
-    }
+    const n = await upsertRows(client, rows);   // швидка пакетна заливка (тримає й тисячі рядків)
     await client.query('COMMIT');
     res.json({ sku, processed: n });
   } catch (e) {
@@ -190,15 +186,16 @@ async function upsertRows(client, rows) {
     const vals = [];
     const params = [];
     part.forEach((r, k) => {
-      const b = k * 4;
-      vals.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4})`);
-      params.push(r.sku, r.brand, r.model, r.model_norm);
+      const b = k * 6;
+      vals.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6})`);
+      params.push(r.sku, r.brand, r.model, r.model_norm, r.code || '', norm(r.code || ''));
     });
     await client.query(
-      `INSERT INTO compatibility (sku, brand, model, model_norm)
+      `INSERT INTO compatibility (sku, brand, model, model_norm, code, code_norm)
          VALUES ${vals.join(',')}
          ON CONFLICT (sku, model_norm)
-         DO UPDATE SET brand = EXCLUDED.brand, model = EXCLUDED.model`,
+         DO UPDATE SET brand = EXCLUDED.brand, model = EXCLUDED.model,
+                       code = EXCLUDED.code, code_norm = EXCLUDED.code_norm`,
       params
     );
     n += part.length;
@@ -260,44 +257,209 @@ app.post('/api/import-feed', async (req, res) => {
   }
 });
 
-// Проста сторінка-кнопка (щоб наповнити БД без терміналу).
+// === Наповнення з ПОВНОГО експорту (XML з HTML-таблицями): парсить 2/3 колонки + код ===
+// POST /api/import-export  headers: X-Import-Key
+// body: { "url":"https://.../export.xml", "replace":true }
+app.post('/api/import-export', async (req, res) => {
+  if (req.get('X-Import-Key') !== process.env.IMPORT_KEY) return res.status(401).json({ error: 'unauthorized' });
+  const url = String((req.body && req.body.url) || process.env.EXPORT_URL || '').trim();
+  const replace = !!(req.body && req.body.replace === true);
+  if (!url) return res.status(400).json({ ok: false, error: 'url_required' });
+  try {
+    const r = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36', 'Accept': 'application/xml,text/xml,*/*' }
+    });
+    if (!r.ok) throw new Error('експорт недоступний (HTTP ' + r.status + ')');
+
+    const client = await pool.connect();
+    let products = 0, ins = 0, buf = '', pending = [];
+    try {
+      await client.query('BEGIN');
+      if (replace) await client.query('TRUNCATE compatibility');
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      const flush = async () => { if (pending.length) { ins += await upsertRows(client, pending); pending = []; } };
+      let sawOffer = false;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('</offer>')) >= 0) {
+          const s = buf.lastIndexOf('<offer', idx);
+          const off = s >= 0 ? buf.slice(s, idx + 8) : '';
+          buf = buf.slice(idx + 8);
+          const vc = off.match(/<vendorCode>([\s\S]*?)<\/vendorCode>/);
+          const dm = off.match(/<description>([\s\S]*?)<\/description>/);
+          if (!vc || !dm) continue;
+          sawOffer = true;
+          const sku = vc[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+          if (!sku) continue;
+          const desc = dm[1].replace(/<!\[CDATA\[|\]\]>/g, '');
+          const ents = parseTables(desc);
+          if (!ents.length) continue;
+          products++;
+          const seen = new Set();
+          for (const e of ents) {
+            const mn = norm(e.model);
+            if (!mn || seen.has(mn)) continue;
+            seen.add(mn);
+            pending.push({ sku, brand: e.brand, model: e.model, model_norm: mn, code: e.code });
+          }
+          if (pending.length >= 2000) await flush();
+        }
+        if (buf.length > 4000000) buf = buf.slice(-2000000); // страховка від розростання
+      }
+      await flush();
+      if (!sawOffer) throw new Error('у відповіді немає <offer> (не той URL або анти-бот)');
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+    res.json({ ok: true, products, rows: ins, replace });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Сторінка адміна: наповнення бази (з фіду) + ручне додавання моделей для товару.
 app.get('/admin', (_req, res) => {
   res.type('html').send(`<!doctype html><html lang="uk"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>Сумісні моделі — імпорт</title>
-<style>body{font-family:Arial,sans-serif;max-width:560px;margin:40px auto;padding:0 16px;color:#1f2328}
-h1{font-size:20px}label{display:block;margin:14px 0 4px;font-weight:700;font-size:14px}
-input[type=text],input[type=password]{width:100%;box-sizing:border-box;padding:11px 12px;font-size:15px;border:1px solid #d0d7de;border-radius:8px}
-.row{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:14px}
-button{margin-top:18px;background:#1f883d;color:#fff;border:0;border-radius:8px;padding:12px 18px;font-size:15px;font-weight:700;cursor:pointer}
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Сумісні моделі — база</title>
+<style>body{font-family:Arial,sans-serif;max-width:720px;margin:32px auto;padding:0 16px;color:#1f2328}
+h1{font-size:20px;margin:0 0 6px}h2{font-size:16px;margin:0 0 4px}
+.card{border:1px solid #e3e6ea;border-radius:12px;padding:18px;margin:18px 0}
+label{display:block;margin:12px 0 4px;font-weight:700;font-size:14px}
+input[type=text],input[type=password],textarea{width:100%;box-sizing:border-box;padding:11px 12px;font-size:15px;border:1px solid #d0d7de;border-radius:8px;font-family:inherit}
+textarea{min-height:160px;resize:vertical;white-space:pre;overflow:auto}
+.row{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:14px}
+button{margin-top:16px;background:#1f883d;color:#fff;border:0;border-radius:8px;padding:11px 18px;font-size:15px;font-weight:700;cursor:pointer}
 button:disabled{opacity:.6;cursor:default}.hint{color:#6b7280;font-size:13px;margin-top:4px}
-#out{margin-top:18px;padding:12px;border-radius:8px;white-space:pre-wrap;font-size:14px;display:none}
+.out{margin-top:14px;padding:11px;border-radius:8px;white-space:pre-wrap;font-size:14px;display:none}
 .ok{background:#eaf6ec;border:1px solid #bfe3c6;color:#1a7f37}.bad{background:#fdecea;border:1px solid #f3c1bb;color:#b42318}</style>
 </head><body>
-<h1>Наповнити базу сумісних моделей із фіду</h1>
-<p class="hint">Ключ — це значення <b>IMPORT_KEY</b> зі змінних сервісу в Railway. Він нікуди не зберігається.</p>
+<h1>Сумісні моделі — база</h1>
+<p class="hint">Ключ — значення <b>IMPORT_KEY</b> зі змінних сервісу в Railway. Він нікуди не зберігається.</p>
 <label>Ключ (IMPORT_KEY)</label>
 <input id="key" type="password" autocomplete="off" placeholder="встав ключ">
-<label>Артикул товару (необов'язково)</label>
-<input id="sku" type="text" autocomplete="off" placeholder="напр. 0873 — залиш порожнім, щоб залити весь сайт">
-<div class="row"><input id="replace" type="checkbox"><label style="margin:0;font-weight:400">Спершу очистити старі моделі цих товарів</label></div>
-<button id="go">Імпортувати з фіду</button>
-<div id="out"></div>
+
+<div class="card">
+  <h2>0) Наповнити з повного експорту (рекомендовано)</h2>
+  <p class="hint">Бере списки з HTML-таблиць у описах: 2 і 3 колонки, «Марка», дужки, індустріальний код.
+  Встав URL повного XML-експорту товарів (з описами). «Замінити все» — повна перезаливка бази.</p>
+  <label>URL повного експорту (XML)</label>
+  <input id="expUrl" type="text" placeholder="https://lartek.com.ua/content/export/....xml">
+  <div class="row"><input id="expReplace" type="checkbox" checked><label style="margin:0;font-weight:400">Замінити все (повна перезаливка)</label></div>
+  <button id="expGo">Залити з експорту</button>
+  <div class="out" id="expOut"></div>
+</div>
+
+<div class="card">
+  <h2>1) Ручне додавання моделей для товару</h2>
+  <p class="hint">Для нового товару: впиши артикул і встав список моделей — по одній на рядок.
+  Можна «Бренд Модель» в рядку, або лише код (тоді візьметься бренд за замовчуванням).</p>
+  <label>Артикул товару</label>
+  <input id="mSku" type="text" placeholder="напр. 237">
+  <label>Бренд за замовчуванням (необов'язково)</label>
+  <input id="mBrand" type="text" placeholder="напр. Philips — якщо в рядках лише коди">
+  <label>Моделі (по одній на рядок)</label>
+  <textarea id="mText" placeholder="Philips HQ8142
+Philips S1070/04
+HQ8150
+HQ8160"></textarea>
+  <div class="row"><input id="mReplace" type="checkbox" checked><label style="margin:0;font-weight:400">Замінити наявні моделі цього товару</label></div>
+  <button id="mGo">Зберегти моделі</button>
+  <div class="out" id="mOut"></div>
+</div>
+
+<div class="card">
+  <h2>2) Масове наповнення з фіду Horoshop</h2>
+  <p class="hint">Бере списки з описів фіду. Артикул порожній = весь сайт (~хвилина).</p>
+  <label>Артикул товару (необов'язково)</label>
+  <input id="sku" type="text" placeholder="напр. 0873 — порожньо = весь сайт">
+  <div class="row"><input id="replace" type="checkbox"><label style="margin:0;font-weight:400">Спершу очистити старі моделі цих товарів</label></div>
+  <button id="go">Імпортувати з фіду</button>
+  <div class="out" id="out"></div>
+</div>
+
 <script>
+function key(){return document.getElementById('key').value.trim();}
+function show(el,cls,txt){el.style.display='block';el.className='out '+cls;el.textContent=txt;}
+
+// ── 0) імпорт з повного експорту ──
+var expGo=document.getElementById('expGo'),expOut=document.getElementById('expOut');
+expGo.onclick=function(){
+  if(!key()){alert('Введи ключ');return;}
+  var url=document.getElementById('expUrl').value.trim();
+  if(!url){alert('Встав URL експорту');return;}
+  var replace=document.getElementById('expReplace').checked;
+  expGo.disabled=true; show(expOut,'','Заливаю з експорту… (кілька хвилин, не закривай сторінку)');
+  fetch('/api/import-export',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},
+    body:JSON.stringify({url:url,replace:replace})})
+    .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+    .then(function(x){
+      if(x.ok&&x.d.ok) show(expOut,'ok','Готово ✔\\nТоварів: '+x.d.products+'\\nМоделей залито: '+x.d.rows);
+      else show(expOut,'bad','Помилка: '+((x.d&&x.d.error)||'невідома')+(x.d&&x.d.error==='unauthorized'?' (невірний ключ)':''));
+    })
+    .catch(function(e){show(expOut,'bad','Помилка з\\'єднання: '+e.message);})
+    .finally(function(){expGo.disabled=false;});
+};
+
+// ── 1) ручне додавання ──
+function parseModels(text, defBrand){
+  return text.split(/\\r?\\n/).map(function(line){
+    line=line.trim(); if(!line) return null;
+    var parts=line.split(/\\t|;|,|\\s{2,}/).map(function(s){return s.trim();}).filter(Boolean);
+    var brand, model;
+    if(parts.length>=2){ brand=parts[0]; model=parts.slice(1).join(' '); }
+    else {
+      var m=line.match(/^(\\S+)\\s+(\\S.*)$/);
+      if(m && /^[A-Za-zА-Яа-яЇІЄҐїієґ&.\\-]+$/.test(m[1])){ brand=m[1]; model=m[2]; }
+      else { brand=defBrand; model=line; }
+    }
+    return {brand:(brand||defBrand||''), model:model};
+  }).filter(Boolean);
+}
+var mGo=document.getElementById('mGo'),mOut=document.getElementById('mOut');
+mGo.onclick=function(){
+  if(!key()){alert('Введи ключ');return;}
+  var sku=document.getElementById('mSku').value.trim();
+  var defBrand=document.getElementById('mBrand').value.trim();
+  var models=parseModels(document.getElementById('mText').value, defBrand);
+  var replace=document.getElementById('mReplace').checked;
+  if(!sku){alert('Впиши артикул');return;}
+  if(!models.length){alert('Встав хоч одну модель');return;}
+  mGo.disabled=true; show(mOut,'','Зберігаю '+models.length+' рядків…');
+  fetch('/api/import',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},
+    body:JSON.stringify({sku:sku,models:models,replace:replace})})
+    .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+    .then(function(x){
+      if(x.ok&&x.d.processed!=null) show(mOut,'ok','Готово ✔ Збережено моделей: '+x.d.processed+' (артикул '+x.d.sku+')');
+      else show(mOut,'bad','Помилка: '+((x.d&&x.d.error)||'невідома')+(x.d&&x.d.error==='unauthorized'?' (невірний ключ)':''));
+    })
+    .catch(function(e){show(mOut,'bad','Помилка з\\'єднання: '+e.message);})
+    .finally(function(){mGo.disabled=false;});
+};
+
+// ── 2) імпорт з фіду ──
 var go=document.getElementById('go'),out=document.getElementById('out');
 go.onclick=function(){
-  var key=document.getElementById('key').value.trim();
+  if(!key()){alert('Введи ключ');return;}
   var sku=document.getElementById('sku').value.trim();
   var replace=document.getElementById('replace').checked;
-  if(!key){alert('Введи ключ');return;}
-  go.disabled=true;out.style.display='block';out.className='';out.textContent='Імпортую… (для всього сайту може зайняти кілька хвилин, не закривай сторінку)';
-  fetch('/api/import-feed',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key},
+  go.disabled=true; show(out,'','Імпортую… (для всього сайту — кілька хвилин, не закривай сторінку)');
+  fetch('/api/import-feed',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},
     body:JSON.stringify(sku?{sku:sku,replace:replace}:{replace:replace})})
-    .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+    .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
     .then(function(x){
-      if(x.ok&&x.d.ok){out.className='ok';out.textContent='Готово ✔\\nТоварів: '+x.d.products+'\\nМоделей залито: '+x.d.rows+'\\nОхоплення: '+x.d.scope;}
-      else{out.className='bad';out.textContent='Помилка: '+((x.d&&x.d.error)||'невідома')+(x.d&&x.d.error==='unauthorized'?' (невірний ключ)':'');}
+      if(x.ok&&x.d.ok) show(out,'ok','Готово ✔\\nТоварів: '+x.d.products+'\\nМоделей залито: '+x.d.rows+'\\nОхоплення: '+x.d.scope);
+      else show(out,'bad','Помилка: '+((x.d&&x.d.error)||'невідома')+(x.d&&x.d.error==='unauthorized'?' (невірний ключ)':''));
     })
-    .catch(function(e){out.className='bad';out.textContent='Помилка з\\'єднання: '+e.message;})
+    .catch(function(e){show(out,'bad','Помилка з\\'єднання: '+e.message);})
     .finally(function(){go.disabled=false;});
 };
 </script>

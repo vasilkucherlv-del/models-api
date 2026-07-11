@@ -1,10 +1,13 @@
 <!--
-  Блок "Сумісні моделі" для сторінки товару (Horoshop) — двоколонковий.
-  СТІЙКИЙ до редактора Horoshop: у вставленому коді немає порожніх елементів і <style>,
-  усю начинку скрипт будує сам уже на сторінці (редактору нема що "чистити").
+  Блок "Сумісні моделі" для сторінки товару (Horoshop) — двоколонковий, ДВОМОВНИЙ.
+  Сам визначає мову за URL: шлях, що починається з /ru/ → російська, інакше українська.
+  Тому один і той самий блок можна ставити і в українську, і в російську версію вкладки.
 
-  Зліва: вибір бренду техніки (з кількістю) + перелік моделей бренду з ✓.
-  Справа: швидкий ТОЧНИЙ пошук по всіх брендах (мінімум 3 символи) + пояснення.
+  СТІЙКИЙ до редактора Horoshop: у вставленому коді немає порожніх елементів і <style>,
+  усю начинку скрипт будує сам уже на сторінці.
+
+  Зліва: вибір бренду техніки (з кількістю) + приклад моделей бренду з ✓.
+  Справа: швидкий ТОЧНИЙ пошук (повний код цілком) + пояснення.
 
   НАЛАШТУВАННЯ (на div нижче):
     • data-api — публічний домен твого models-api.
@@ -14,7 +17,6 @@
 <script>
 (function(){
   var cur = document.currentScript;
-  // знайти свій монтажний div (перед скриптом; запасний варіант — перший неініціалізований)
   var root = null, p = cur ? cur.previousElementSibling : null;
   while(p){ if(p.classList && p.classList.contains('lartek-compat-mount')){ root = p; break; } p = p.previousElementSibling; }
   if(!root){ var all = document.querySelectorAll('.lartek-compat-mount');
@@ -24,10 +26,53 @@
 
   var API = (root.getAttribute('data-api')||'').replace(/\/+$/,'');
   var SKU = (root.getAttribute('data-sku')||'').trim();
+  if(!SKU){ var _m=document.querySelector('meta[itemprop="sku"]'); SKU=_m?String(_m.getAttribute('content')||'').trim():''; }  // авто-артикул зі сторінки
+
+  // Сховати вкладку «Сумісні моделі», якщо у товару немає сумісних моделей.
+  function hideTab(){
+    var panel = root.closest ? root.closest('[data-content-id]') : null;
+    if(panel){
+      panel.style.display='none';
+      var id=panel.getAttribute('data-content-id');
+      var links=document.querySelectorAll('[href="#'+id+'"]');
+      for(var i=0;i<links.length;i++) links[i].style.display='none';
+    } else { root.style.display='none'; }
+  }
   var MIN = parseInt(root.getAttribute('data-min')||'3',10);
   var PREVIEW = parseInt(root.getAttribute('data-preview')||'8',10);
 
-  // ── стилі (додаємо один раз, через JS — щоб редактор не чіпав) ──
+  // Мова: /ru/ у шляху → російська, інакше українська.
+  var isRu = /^\/ru(\/|$)/.test(location.pathname);
+  var T = isRu ? {
+    title:'Подходит к моделям:', brandLabel:'Выберите бренд техники',
+    quickLabel:'Введите модель для быстрого поиска',
+    qph:'Модель или индустриальный код, минимум '+MIN+' символа',
+    forms:['модель','модели','моделей'], other:'Другие',
+    shownOf:function(n,t){return 'Показано '+n+' из '+t+'. Чтобы проверить свою модель — воспользуйтесь поиском справа.';},
+    minChars:function(m){return 'Минимум '+m+' символа.';},
+    searching:'Ищу…', tooMany:'Слишком много совпадений — уточните запрос.',
+    notFound:function(x){return '✕ Модели «'+x+'» нет в списке совместимых';},
+    fits:'✓ Подходит к вашему прибору', incTitle:'⚠ Уточните полный код модели',
+    incHint:'Введён неполный код. Цифры после «/» важны — именно они определяют совместимость. Проверьте точный код на шильдике прибора.',
+    help:'Здесь отображены совместимые модели для этой запчасти. Выберите бренд техники, затем введите модель прибора. Если позиция совместима с вашим прибором — ваша модель обязательно отобразится в списке. Если вашей модели нет — <b>свяжитесь с нами</b>.',
+    listUpdating:'Список уточняется.', loadFail:'Не удалось загрузить. Воспользуйтесь поиском справа.',
+    loading:'Загрузка…', loadErr:'Ошибка загрузки.', checkFail:'Не удалось проверить. Попробуйте ещё.'
+  } : {
+    title:'Підходить до моделей:', brandLabel:'Виберіть бренд техніки',
+    quickLabel:'Введіть модель для швидкого пошуку',
+    qph:'Модель або індустріальний код, мінімум '+MIN+' символи',
+    forms:['модель','моделі','моделей'], other:'Інші',
+    shownOf:function(n,t){return 'Показано '+n+' з '+t+'. Щоб перевірити свою модель — скористайтесь пошуком праворуч.';},
+    minChars:function(m){return 'Мінімум '+m+' символи.';},
+    searching:'Шукаю…', tooMany:'Забагато збігів — уточніть запит.',
+    notFound:function(x){return '✕ Моделі «'+x+'» немає у списку сумісних';},
+    fits:'✓ Підходить до вашого приладу', incTitle:'⚠ Уточніть повний код моделі',
+    incHint:'Введено неповний код. Цифри після «/» важливі — саме вони визначають сумісність. Перевірте точний код на шильдику приладу.',
+    help:'Тут відображено сумісні моделі для цієї запчастини. Оберіть бренд техніки, потім введіть модель приладу. Якщо позиція сумісна з вашим приладом — ваша модель обов’язково відобразиться у списку. Якщо вашої моделі немає — <b>зв’яжіться з нами</b>.',
+    listUpdating:'Список уточнюється.', loadFail:'Не вдалося завантажити. Скористайтесь пошуком праворуч.',
+    loading:'Завантаження…', loadErr:'Помилка завантаження.', checkFail:'Не вдалося перевірити. Спробуйте ще.'
+  };
+
   if(!document.getElementById('lartek-compat-style')){
     var st = document.createElement('style'); st.id='lartek-compat-style';
     st.textContent = ''
@@ -46,6 +91,8 @@
     +'.lcw-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;font-size:14px;border-top:1px solid #eef1f4}'
     +'.lcw-list li:first-child{border-top:0}'
     +'.lcw-model{font-weight:600}'
+    +'.lcw-cell{display:flex;flex-direction:column;gap:1px}'
+    +'.lcw-code{font-size:12px;color:var(--mut);font-family:"SFMono-Regular",Consolas,monospace}'
     +'.lcw-brand{color:var(--mut);font-weight:400;margin-right:6px}'
     +'.lcw-check{color:var(--ok);font-weight:700;flex:0 0 auto}'
     +'.lcw-list mark{background:#fff3bf;padding:0 1px;border-radius:2px}'
@@ -55,35 +102,34 @@
     +'.lcw-banner.ok{background:#eaf6ec;color:var(--ok);border:1px solid #bfe3c6}'
     +'.lcw-banner.bad{background:#fdecea;color:var(--bad);border:1px solid #f3c1bb}'
     +'.lcw-banner.info{background:#f2f4f7;color:#374151;border:1px solid var(--bd)}'
+    +'.lcw-banner.warn{background:#fff8e6;color:#8a6d00;border:1px solid #f2df9e}'
     +'.lcw-help{font-size:13px;color:#4b5563;line-height:1.55}'
     +'.lcw-hint{font-size:13px;color:var(--mut);padding:4px 2px}'
     +'@media(max-width:720px){.lcw-cols{grid-template-columns:1fr;gap:22px}.lcw-title{font-size:19px}}';
     document.head.appendChild(st);
   }
 
-  // ── будуємо начинку (у вставленому коді порожніх елементів немає) ──
   root.className = 'lcw';
   root.textContent = '';
   root.innerHTML = ''
-    +'<div class="lcw-title">Підходить до моделей: <span class="lcw-total"></span></div>'
+    +'<div class="lcw-title">'+T.title+' <span class="lcw-total"></span></div>'
     +'<div class="lcw-cols">'
     +  '<div>'
-    +    '<label class="lcw-label">Виберіть бренд техніки</label>'
-    +    '<select class="lcw-brand" aria-label="Бренд техніки"></select>'
-    +    '<div class="lcw-inwrap"><input class="lcw-input lcw-binput" type="search" autocomplete="off" spellcheck="false" placeholder="Введіть модель, щоб перевірити свою"></div>'
+    +    '<label class="lcw-label">'+T.brandLabel+'</label>'
+    +    '<select class="lcw-brand" aria-label="'+T.brandLabel+'"></select>'
     +    '<div class="lcw-blist"></div>'
     +  '</div>'
     +  '<div>'
-    +    '<div class="lcw-label">Введіть модель для швидкого пошуку <span class="lcw-mut lcw-qcount"></span></div>'
-    +    '<div class="lcw-inwrap"><span class="lcw-ico">🔍</span><input class="lcw-input lcw-input--ico lcw-qinput" type="search" autocomplete="off" spellcheck="false" placeholder="Модель або індустріальний код, мінімум 3 символи"></div>'
+    +    '<div class="lcw-label">'+T.quickLabel+' <span class="lcw-mut lcw-qcount"></span></div>'
+    +    '<div class="lcw-inwrap"><span class="lcw-ico">🔍</span><input class="lcw-input lcw-input--ico lcw-qinput" type="search" autocomplete="off" spellcheck="false" placeholder="'+T.qph+'"></div>'
     +    '<div class="lcw-result lcw-qresult"></div>'
-    +    '<div class="lcw-help">Ми зібрали та структурували велику кількість моделей різної побутової техніки. У цьому розділі з глобального списку відібрано <b>сумісні</b> моделі. Спочатку оберіть бренд техніки, потім почніть вводити модель (або індустріальний/комерційний код). Якщо позиція підходить — ваша модель обов’язково відобразиться у списку. Якщо вашої моделі немає — <b>зв’яжіться з нами</b>.</div>'
+    +    '<div class="lcw-help">'+T.help+'</div>'
     +  '</div>'
     +'</div>';
 
   var q = function(c){ return root.querySelector('.'+c); };
   var elTotal=q('lcw-total'), elQcount=q('lcw-qcount'), elBrand=q('lcw-brand'),
-      elBinput=q('lcw-binput'), elBlist=q('lcw-blist'), elQinput=q('lcw-qinput'), elQresult=q('lcw-qresult');
+      elBlist=q('lcw-blist'), elQinput=q('lcw-qinput'), elQresult=q('lcw-qresult');
   var setText=function(el,t){ if(el) el.textContent=t; };
   var setHtml=function(el,h){ if(el) el.innerHTML=h; };
 
@@ -91,71 +137,70 @@
   function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function api(path){ return fetch(API+path,{headers:{'Accept':'application/json'}}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }); }
   function plural(n,f){ var a=n%10,b=n%100; return (a===1&&b!==11)?f[0]:(a>=2&&a<=4&&(b<10||b>=20))?f[1]:f[2]; }
-  function nModels(n){ return n+' '+plural(n,['модель','моделі','моделей']); }
+  function nModels(n){ return n+' '+plural(n,T.forms); }
   function hi(model,qn){ var s=esc(model); if(!qn) return s;
     var nm='',map=[]; for(var i=0;i<model.length;i++){var c=model[i].toUpperCase(); if(/[A-Z0-9]/.test(c)){nm+=c;map.push(i);}}
     var at=nm.indexOf(qn); if(at<0) return s; var f=map[at],t=map[at+qn.length-1];
     return esc(model.slice(0,f))+'<mark>'+esc(model.slice(f,t+1))+'</mark>'+esc(model.slice(t+1)); }
-  function li(it,qn,showBrand){ return '<li><span>'+(showBrand?'<span class="lcw-brand">'+esc(it.brand)+'</span>':'')+'<span class="lcw-model">'+hi(it.model,qn)+'</span></span><span class="lcw-check">✓</span></li>'; }
-  function listHtml(items,qn,showBrand){ return items.length ? items.map(function(it){return li(it,qn,showBrand);}).join('') : '<div class="lcw-empty">Нічого не знайдено.</div>'; }
+  function li(it,qn){
+    var b=it.brand?'<span class="lcw-brand">'+esc(it.brand)+' </span>':'';
+    var main='<span class="lcw-model">'+b+hi(it.model,qn)+'</span>';
+    var code=it.code?'<span class="lcw-code">'+hi(it.code,qn)+'</span>':'';
+    return '<li><span class="lcw-cell">'+main+code+'</span><span class="lcw-check">✓</span></li>';
+  }
+  function listHtml(items,qn){ return items.length ? items.map(function(it){return li(it,qn);}).join('') : '<div class="lcw-empty">—</div>'; }
 
-  if(!API || !SKU){ setText(elTotal,'(блок не налаштовано: data-api / data-sku)'); return; }
+  if(!API || !SKU){ setText(elTotal,'(no data-api / data-sku)'); return; }
 
   var BRAND_COUNT = {};
   function loadBrands(){
     api('/api/brands?sku='+encodeURIComponent(SKU)).then(function(d){
       var brands=d.brands||[], total=d.total|0;
       setText(elTotal,'('+nModels(total)+')'); setText(elQcount,'('+nModels(total)+')');
-      if(!brands.length){ setHtml(elBrand,'<option>—</option>'); setHtml(elBlist,'<div class="lcw-empty">Список уточнюється.</div>'); return; }
+      if(!brands.length || total<=0){ hideTab(); return; }   // немає моделей → ховаємо вкладку
       brands.forEach(function(b){ BRAND_COUNT[b.brand]=b.count; });
-      setHtml(elBrand, brands.map(function(b){ return '<option value="'+esc(b.brand)+'">'+esc(b.brand||'Інші')+' ('+b.count+')</option>'; }).join(''));
+      setHtml(elBrand, brands.map(function(b){ return '<option value="'+esc(b.brand)+'">'+esc(b.brand||T.other)+' ('+b.count+')</option>'; }).join(''));
       loadBrandModels();
-    }).catch(function(){ setText(elTotal,''); setHtml(elBlist,'<div class="lcw-empty">Не вдалося завантажити. Скористайтесь пошуком праворуч.</div>'); });
+    }).catch(function(){ setText(elTotal,''); setHtml(elBlist,'<div class="lcw-empty">'+T.loadFail+'</div>'); });
   }
-  var bTimer=null;
   function loadBrandModels(){
     if(!elBrand) return;
-    var brand=elBrand.value, qb=elBinput?elBinput.value:'', searching=norm(qb).length>=MIN;
-    setHtml(elBlist,'<div class="lcw-empty">Завантаження…</div>');
-    var pth='/api/models?sku='+encodeURIComponent(SKU)+'&brand='+encodeURIComponent(brand);
-    if(searching) pth+='&q='+encodeURIComponent(qb);
-    api(pth).then(function(d){
-      if(d.tooMany){ setHtml(elBlist,'<div class="lcw-empty">Забагато збігів — введіть більше символів моделі.</div>'); return; }
-      var items=d.items||[];
-      if(searching){
-        var ulS='<ul class="lcw-list">'+listHtml(items, norm(qb), false)+'</ul>';
-        setHtml(elBlist, items.length ? ulS : '<div class="lcw-empty">У цьому бренді моделі «'+esc(qb.trim())+'» немає.</div>');
-      } else {
-        // приклад: показуємо лише кілька (решта — тільки через пошук; повний список не відкриваємо)
-        var total=BRAND_COUNT[brand]!=null?BRAND_COUNT[brand]:items.length;
-        var shown=items.slice(0, PREVIEW);
-        var ulB='<ul class="lcw-list">'+listHtml(shown, '', false)+'</ul>';
-        var more=total-shown.length;
-        var note=more>0 ? '<div class="lcw-hint">Показано '+shown.length+' з '+nModels(total)+'. Введіть свою модель у поле вище, щоб перевірити.</div>' : '';
-        setHtml(elBlist, ulB+note);
-      }
-    }).catch(function(){ setHtml(elBlist,'<div class="lcw-empty">Помилка завантаження.</div>'); });
+    var brand=elBrand.value;
+    setHtml(elBlist,'<div class="lcw-empty">'+T.loading+'</div>');
+    api('/api/models?sku='+encodeURIComponent(SKU)+'&brand='+encodeURIComponent(brand)).then(function(d){
+      var items=(d.items||[]).slice(0, PREVIEW);
+      var total=BRAND_COUNT[brand]!=null?BRAND_COUNT[brand]:items.length;
+      var more=total-items.length;
+      var ul='<ul class="lcw-list">'+listHtml(items, '')+'</ul>';
+      var note=more>0 ? '<div class="lcw-hint">'+T.shownOf(items.length, nModels(total))+'</div>' : '';
+      setHtml(elBlist, ul+note);
+    }).catch(function(){ setHtml(elBlist,'<div class="lcw-empty">'+T.loadErr+'</div>'); });
   }
 
   var qTimer=null,qLast='';
   function onQuick(){
     var raw=elQinput.value, qn=norm(raw);
     if(qn===qLast) return; qLast=qn; clearTimeout(qTimer);
-    if(qn.length<MIN){ setHtml(elQresult, raw?'<div class="lcw-hint">Мінімум '+MIN+' символи.</div>':''); return; }
+    if(qn.length<MIN){ setHtml(elQresult, raw?'<div class="lcw-hint">'+T.minChars(MIN)+'</div>':''); return; }
     qTimer=setTimeout(function(){
-      setHtml(elQresult,'<div class="lcw-hint">Шукаю…</div>');
+      setHtml(elQresult,'<div class="lcw-hint">'+T.searching+'</div>');
       api('/api/models?sku='+encodeURIComponent(SKU)+'&q='+encodeURIComponent(raw)).then(function(d){
         if(norm(elQinput.value)!==qn) return;
-        if(d.tooMany){ setHtml(elQresult,'<div class="lcw-banner info">Забагато збігів — уточніть запит.</div>'); return; }
+        if(d.tooMany){ setHtml(elQresult,'<div class="lcw-banner info">'+T.tooMany+'</div>'); return; }
         var items=d.items||[];
-        if(!items.length){ setHtml(elQresult,'<div class="lcw-banner bad">✕ Моделі «'+esc(raw.trim())+'» немає у списку сумісних</div>'); return; }
-        setHtml(elQresult,'<div class="lcw-banner ok">✓ Підходить — знайдено ('+items.length+')</div><ul class="lcw-list">'+listHtml(items,qn,true)+'</ul>');
-      }).catch(function(){ setHtml(elQresult,'<div class="lcw-hint">Не вдалося перевірити. Спробуйте ще.</div>'); });
+        if(!items.length){ setHtml(elQresult,'<div class="lcw-banner bad">'+T.notFound(esc(raw.trim()))+'</div>'); return; }
+        // ТОЧНИЙ збіг: усі символи мають сходитись (за моделлю АБО за індустр. кодом).
+        var exact = items.filter(function(it){ return norm(it.model)===qn || (it.code && norm(it.code)===qn); });
+        if(exact.length){
+          setHtml(elQresult,'<div class="lcw-banner ok">'+T.fits+'</div><ul class="lcw-list">'+listHtml(exact,qn)+'</ul>');
+        } else {
+          setHtml(elQresult,'<div class="lcw-banner warn">'+T.incTitle+'</div><div class="lcw-hint">'+T.incHint+'</div>');
+        }
+      }).catch(function(){ setHtml(elQresult,'<div class="lcw-hint">'+T.checkFail+'</div>'); });
     },180);
   }
 
-  if(elBrand) elBrand.addEventListener('change', function(){ if(elBinput) elBinput.value=''; loadBrandModels(); });
-  if(elBinput) elBinput.addEventListener('input', function(){ clearTimeout(bTimer); bTimer=setTimeout(loadBrandModels,180); });
+  if(elBrand) elBrand.addEventListener('change', loadBrandModels);
   if(elQinput) elQinput.addEventListener('input', onQuick);
   loadBrands();
 })();

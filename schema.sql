@@ -11,6 +11,12 @@ CREATE TABLE IF NOT EXISTS compatibility (
   UNIQUE (sku, model_norm)             -- захист від дублів у межах товару
 );
 
+-- Індустріальний код моделі (для 3-колонкових таблиць): показ другим рядком + пошук.
+ALTER TABLE compatibility ADD COLUMN IF NOT EXISTS code      TEXT NOT NULL DEFAULT '';
+ALTER TABLE compatibility ADD COLUMN IF NOT EXISTS code_norm TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_comp_code_trgm
+  ON compatibility USING gin (code_norm gin_trgm_ops);
+
 CREATE INDEX IF NOT EXISTS idx_comp_sku
   ON compatibility (sku);
 
