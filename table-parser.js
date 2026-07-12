@@ -31,13 +31,27 @@ const HEADER_SET = new Set(['бренд','марка','модель','модел
 
 // Бренд: слово латиницею без цифр (Bosch, Braun, Indesit, AL-FA…).
 const isBrand = s => !!s && !/\d/.test(s) && /^[A-Za-z][A-Za-z0-9&.\-\/ ]*$/.test(s);
-// Модель: латиниця+цифра (MQ7000X, BM250) або довгий числовий код (>=5 цифр).
-function modelOK(s) {
+// Відомі бренди кирилицею (латинські покриває isBrand). Додавай сюди за потреби.
+const CYR_BRANDS = new Set(['атлант', 'белвар']);
+const isKnownBrand = s => isBrand(s) || CYR_BRANDS.has((s || '').trim().toLowerCase());
+// Модель латиницею: латинська літера+цифра (MQ7000X) або довгий числовий код (>=5 цифр).
+// Для лічильника «схоже на сумісність» і рядків без бренду — щоб характеристики
+// («1200 Вт») не потрапляли в моделі.
+function modelLatin(s) {
   if (!s) return false;
   if (/[A-Za-z]/.test(s) && /\d/.test(s)) return true;
   if (/^\d{5,}$/.test(s)) return true;
   return false;
 }
+// Модель будь-якою мовою (кирилиця+цифра, напр. Атлант 35М101) — дозволена ЛИШЕ після
+// відомого бренду, тож таблиці характеристик лишаються захищені.
+function modelAny(s) {
+  if (!s) return false;
+  if (/[A-Za-zА-Яа-яЇІЄҐїієґё]/.test(s) && /\d/.test(s)) return true;
+  if (/^\d{5,}$/.test(s)) return true;
+  return false;
+}
+const modelOK = modelLatin;
 const isHeaderCell = s => HEADER_SET.has((s || '').toLowerCase())
   || /бренд|марка|модел|сумісн|совмест|\bbrand\b|\bmodel\b/i.test(s || '');
 
@@ -47,7 +61,7 @@ function looksCompat(rowsCells) {
   for (const cs of rowsCells) {
     const nz = cs.filter(c => c && c !== '&nbsp;');
     for (const c of nz) if (modelOK(c)) models++;
-    for (let j = 0; j < nz.length - 1; j++) if (isBrand(nz[j]) && modelOK(nz[j + 1])) return true;
+    for (let j = 0; j < nz.length - 1; j++) if (isKnownBrand(nz[j]) && modelAny(nz[j + 1])) return true;
   }
   return models >= 4;
 }
@@ -72,10 +86,12 @@ function parseLoose(rowsCells) {
       continue;
     }
     // Загальний прохід: слово-бренд задає поточний бренд; код-модель — додає рядок.
-    let cur = '';
+    // Після ВІДОМОГО бренду дозволяємо модель кирилицею (Атлант 35М101); без бренду —
+    // лише латиниця, щоб не тягнути характеристики.
+    let cur = '', curKnown = false;
     for (const c of cs) {
-      if (isBrand(c)) cur = c;
-      else if (modelLoose(c)) res.push({ brand: cur, model: c, code: '' });
+      if (isKnownBrand(c)) { cur = c; curKnown = true; }
+      else if (curKnown ? modelAny(c) : modelLoose(c)) res.push({ brand: cur, model: c, code: '' });
     }
   }
   return res;
@@ -86,7 +102,7 @@ function parseTables(descHtml) {
   const tables = String(descHtml || '').match(/<table[\s\S]*?<\/table>/gi) || [];
   for (const tbl of tables) {
     const rows = tbl.match(/<tr[\s\S]*?<\/tr>/gi) || [];
-    if (rows.length < 2) continue;
+    if (rows.length < 1) continue;
     const rowsCells = rows.map(cellsOf);
     const before = out.length;
 
