@@ -486,6 +486,7 @@ button:disabled{opacity:.6;cursor:default}.hint{color:#6b7280;font-size:13px;mar
 <p class="hint">Ключ — значення <b>IMPORT_KEY</b> зі змінних сервісу в Railway. Він нікуди не зберігається.</p>
 <label>Ключ (IMPORT_KEY)</label>
 <input id="key" type="password" autocomplete="off" placeholder="встав ключ">
+<div class="row"><input id="keyRemember" type="checkbox"><label style="margin:0;font-weight:400">Запам'ятати ключ у цьому браузері</label></div>
 
 <div class="card">
   <h2>0) Наповнити з повного експорту (рекомендовано)</h2>
@@ -545,6 +546,21 @@ HQ8160"></textarea>
 <script>
 function key(){return document.getElementById('key').value.trim();}
 function show(el,cls,txt){el.style.display='block';el.className='out '+cls;el.textContent=txt;}
+
+// ── запам'ятовування ключа у цьому браузері (localStorage, лише за галочкою) ──
+var keyEl=document.getElementById('key'),remEl=document.getElementById('keyRemember');
+try{
+  var savedKey=localStorage.getItem('lartekImportKey');
+  if(savedKey){keyEl.value=savedKey;remEl.checked=true;}
+}catch(e){}
+function persistKey(){
+  try{
+    if(remEl.checked && key()) localStorage.setItem('lartekImportKey',key());
+    else localStorage.removeItem('lartekImportKey');
+  }catch(e){}
+}
+remEl.addEventListener('change',persistKey);
+keyEl.addEventListener('input',persistKey);
 
 // ── 0) імпорт з повного експорту ──
 var expGo=document.getElementById('expGo'),expOut=document.getElementById('expOut');
