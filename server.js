@@ -47,6 +47,18 @@ const limiter = rateLimit({
 
 app.get('/health', (req, res) => res.send('ok'));
 
+// Перевірка ключів. Головний IMPORT_KEY відкриває все; MANAGER_KEY (необов'язкова
+// змінна) — лише додавання моделей до окремого товару (розділи 1 і 1б на /admin),
+// без масових/руйнівних операцій. Якщо MANAGER_KEY не задано — діє лише головний.
+function hasFullKey(req) {
+  return req.get('X-Import-Key') === process.env.IMPORT_KEY;
+}
+function hasManagerKey(req) {
+  if (hasFullKey(req)) return true;
+  const mk = process.env.MANAGER_KEY;
+  return !!mk && req.get('X-Import-Key') === mk;
+}
+
 // === Один файл коду блоку (щоб у товарах був лише крихітний рядок) ===
 // Товар містить: <div class="lartek-compat-mount"></div><script src=".../widget.js" defer></script>
 // Майбутні зміни вигляду — правимо compat-widget.html, і оновлюється на всіх товарах без імпорту.
@@ -184,7 +196,7 @@ app.get('/api/preview', async (req, res) => {
 // POST /api/import   headers: X-Import-Key: <IMPORT_KEY>
 // body: { "sku":"DEMO123", "replace":true, "models":[{"brand":"Bosch","model":"SMV68IX00D/01"}, ...] }
 app.post('/api/import', async (req, res) => {
-  if (req.get('X-Import-Key') !== process.env.IMPORT_KEY) {
+  if (!hasManagerKey(req)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
   const sku = String(req.body.sku || '').trim();
@@ -267,7 +279,7 @@ function parseSheet(aoa, defBrand) {
 // POST /api/import-xlsx  headers: X-Import-Key
 // body: { sku, replace, defBrand, fileBase64 }  (перша сторінка книги; колонки Бренд/Модель/Код)
 app.post('/api/import-xlsx', async (req, res) => {
-  if (req.get('X-Import-Key') !== process.env.IMPORT_KEY) return res.status(401).json({ error: 'unauthorized' });
+  if (!hasManagerKey(req)) return res.status(401).json({ error: 'unauthorized' });
   const sku = String((req.body && req.body.sku) || '').trim();
   const defBrand = String((req.body && req.body.defBrand) || '').trim();
   const replace = !!(req.body && req.body.replace === true);
@@ -483,7 +495,8 @@ button:disabled{opacity:.6;cursor:default}.hint{color:#6b7280;font-size:13px;mar
 .ok{background:#eaf6ec;border:1px solid #bfe3c6;color:#1a7f37}.bad{background:#fdecea;border:1px solid #f3c1bb;color:#b42318}</style>
 </head><body>
 <h1>Сумісні моделі — база</h1>
-<p class="hint">Ключ — значення <b>IMPORT_KEY</b> зі змінних сервісу в Railway. Він нікуди не зберігається.</p>
+<p class="hint">Ключ — значення <b>IMPORT_KEY</b> зі змінних сервісу в Railway. Він нікуди не зберігається.
+Ключ менеджера (<b>MANAGER_KEY</b>) працює лише для розділів 1 і 1б — масові операції (0 і 2) під ним недоступні.</p>
 <label>Ключ (IMPORT_KEY)</label>
 <input id="key" type="password" autocomplete="off" placeholder="встав ключ">
 <div class="row"><input id="keyRemember" type="checkbox"><label style="margin:0;font-weight:400">Запам'ятати ключ у цьому браузері</label></div>
