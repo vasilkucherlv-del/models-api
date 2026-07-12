@@ -4,6 +4,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const fs = require('fs');
 const path = require('path');
+const XLSX = require('xlsx');
 const { pool, norm, init } = require('./db');
 const { parseFeed } = require('./import-feed');
 const { parseTables } = require('./table-parser');
@@ -206,6 +207,98 @@ app.post('/api/import', async (req, res) => {
     const n = await upsertRows(client, rows);   // швидка пакетна заливка (тримає й тисячі рядків)
     await client.query('COMMIT');
     res.json({ sku, processed: n });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error(e);
+    res.status(500).json({ error: 'server_error' });
+  } finally {
+    client.release();
+  }
+});
+
+// Розбір рядків Excel-таблиці для ручного завантаження (1/2/3 колонки, заголовок,
+// «Бренд Модель» в одній комірці, бренд за замовчуванням). Заливає все, що у файлі —
+// без обмежень «схоже на сумісність» (файл готує людина навмисно).
+const SHEET_HEADWORDS = /бренд|марка|модел|код|brand|model|індустр/i;
+function parseSheet(aoa, defBrand) {
+  const rows = (aoa || []).map(r => (r || []).map(c => String(c == null ? '' : c).replace(/\s+/g, ' ').trim()));
+  const nonEmpty = rows.filter(r => r.some(c => c));
+  if (!nonEmpty.length) return [];
+  let cols = null, start = 0;
+  const h = nonEmpty[0];
+  if (h.some(c => SHEET_HEADWORDS.test(c))) {
+    cols = h.map(c => {
+      const t = c.toLowerCase();
+      if (/бренд|марка|brand/.test(t)) return 'brand';
+      if (/індустр|код|industrial/.test(t)) return 'code';
+      if (/модел|model/.test(t)) return 'model';
+      return 'x';
+    });
+    start = 1;
+  }
+  const out = [];
+  for (let i = start; i < nonEmpty.length; i++) {
+    const r = nonEmpty[i];
+    let brand = '', model = '', code = '';
+    if (cols) {
+      for (let j = 0; j < r.length; j++) {
+        const role = cols[j];
+        if (role === 'brand' && !brand) brand = r[j];
+        else if (role === 'model' && !model) model = r[j];
+        else if (role === 'code' && !code) code = r[j];
+      }
+    } else {
+      const nz = r.filter(c => c);
+      if (nz.length === 1) {
+        const one = nz[0];
+        const m = one.match(/^([A-Za-zА-Яа-яЇІЄҐїієґ][A-Za-zА-Яа-яЇІЄҐїієґ&.\- ]*?)\s+(.*\d.*)$/);
+        if (m) { brand = m[1].trim(); model = m[2].trim(); } else { model = one; }
+      } else { brand = nz[0]; model = nz[1]; if (nz.length >= 3) code = nz[2]; }
+    }
+    if (!model) continue;
+    if (SHEET_HEADWORDS.test(model) && !/\d/.test(model)) continue;   // випадковий заголовок у даних
+    if (!brand) brand = defBrand;
+    out.push({ brand, model, code });
+  }
+  return out;
+}
+
+// === Завантаження моделей одного товару з Excel-файлу (кнопка «прикріпити файл») ===
+// POST /api/import-xlsx  headers: X-Import-Key
+// body: { sku, replace, defBrand, fileBase64 }  (перша сторінка книги; колонки Бренд/Модель/Код)
+app.post('/api/import-xlsx', async (req, res) => {
+  if (req.get('X-Import-Key') !== process.env.IMPORT_KEY) return res.status(401).json({ error: 'unauthorized' });
+  const sku = String((req.body && req.body.sku) || '').trim();
+  const defBrand = String((req.body && req.body.defBrand) || '').trim();
+  const replace = !!(req.body && req.body.replace === true);
+  const b64 = String((req.body && req.body.fileBase64) || '');
+  if (!sku) return res.status(400).json({ error: 'sku_required' });
+  if (!b64) return res.status(400).json({ error: 'file_required' });
+
+  let aoa;
+  try {
+    const buf = Buffer.from(b64, 'base64');
+    const wb = XLSX.read(buf, { type: 'buffer' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    aoa = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
+  } catch (e) { return res.status(400).json({ error: 'bad_file' }); }
+
+  const models = parseSheet(aoa, defBrand);
+  const rows = [];
+  for (const m of models) {
+    const mn = norm(m.model);
+    if (!mn) continue;
+    rows.push({ sku, brand: m.brand || '', model: m.model, model_norm: mn, code: m.code || '' });
+  }
+  if (!rows.length) return res.status(400).json({ error: 'no_models' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (replace) await client.query('DELETE FROM compatibility WHERE sku = $1', [sku]);
+    const n = await upsertRows(client, rows);
+    await client.query('COMMIT');
+    res.json({ ok: true, sku, processed: n });
   } catch (e) {
     await client.query('ROLLBACK');
     console.error(e);
@@ -424,6 +517,22 @@ HQ8160"></textarea>
 </div>
 
 <div class="card">
+  <h2>1б) Прикріпити Excel-файл з моделями</h2>
+  <p class="hint">Для нового товару: впиши артикул і прикріпи .xlsx. Колонки розпізнаються за
+  заголовком (Бренд / Модель / Індустріальний код). Без заголовка: 1 колонка = моделі
+  (бренд візьметься за замовчуванням), 2 = Бренд+Модель, 3 = Бренд+Модель+Код.</p>
+  <label>Артикул товару</label>
+  <input id="xSku" type="text" placeholder="напр. 237">
+  <label>Бренд за замовчуванням (необов'язково)</label>
+  <input id="xBrand" type="text" placeholder="напр. Philips — якщо у файлі лише коди">
+  <label>Файл Excel (.xlsx)</label>
+  <input id="xFile" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+  <div class="row"><input id="xReplace" type="checkbox" checked><label style="margin:0;font-weight:400">Замінити наявні моделі цього товару</label></div>
+  <button id="xGo">Залити з файлу</button>
+  <div class="out" id="xOut"></div>
+</div>
+
+<div class="card">
   <h2>2) Масове наповнення з фіду Horoshop</h2>
   <p class="hint">Бере списки з описів фіду. Артикул порожній = весь сайт (~хвилина).</p>
   <label>Артикул товару (необов'язково)</label>
@@ -490,6 +599,34 @@ mGo.onclick=function(){
     })
     .catch(function(e){show(mOut,'bad','Помилка з\\'єднання: '+e.message);})
     .finally(function(){mGo.disabled=false;});
+};
+
+// ── 1б) прикріплення Excel-файлу ──
+var xGo=document.getElementById('xGo'),xOut=document.getElementById('xOut');
+xGo.onclick=function(){
+  if(!key()){alert('Введи ключ');return;}
+  var sku=document.getElementById('xSku').value.trim();
+  var defBrand=document.getElementById('xBrand').value.trim();
+  var f=document.getElementById('xFile').files[0];
+  var replace=document.getElementById('xReplace').checked;
+  if(!sku){alert('Впиши артикул');return;}
+  if(!f){alert('Прикріпи .xlsx файл');return;}
+  var reader=new FileReader();
+  reader.onload=function(){
+    var b64=String(reader.result).split(',').pop();
+    xGo.disabled=true; show(xOut,'','Читаю файл і заливаю…');
+    fetch('/api/import-xlsx',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},
+      body:JSON.stringify({sku:sku,defBrand:defBrand,replace:replace,fileBase64:b64})})
+      .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+      .then(function(x){
+        if(x.ok&&x.d.ok) show(xOut,'ok','Готово ✔ Збережено моделей: '+x.d.processed+' (артикул '+x.d.sku+')');
+        else show(xOut,'bad','Помилка: '+((x.d&&x.d.error)||'невідома')+(x.d&&x.d.error==='unauthorized'?' (невірний ключ)':x.d&&x.d.error==='no_models'?' (у файлі не знайдено моделей)':''));
+      })
+      .catch(function(e){show(xOut,'bad','Помилка з\\'єднання: '+e.message);})
+      .finally(function(){xGo.disabled=false;});
+  };
+  reader.onerror=function(){show(xOut,'bad','Не вдалося прочитати файл');};
+  reader.readAsDataURL(f);
 };
 
 // ── 2) імпорт з фіду ──
