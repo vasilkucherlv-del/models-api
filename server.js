@@ -100,6 +100,31 @@ app.get('/widget.js', (req, res) => {
   }
 });
 
+// === Повноекранний пошук (mss2) одним файлом — щоб у Horoshop був лише крихітний рядок ===
+// У Horoshop: <script src=".../mss2.js" defer></script>. CSS вбудовується самим скриптом,
+// тож сторінки легшають (~55КБ прибрано з кожної) і файл кешується браузером.
+let _mss2 = null;
+function mss2Body() {
+  if (_mss2) return _mss2;
+  const html = fs.readFileSync(path.join(__dirname, 'embed', 'mss2-search.html'), 'utf8');
+  const css = (html.match(/<style>([\s\S]*?)<\/style>/) || [, ''])[1];
+  const js = (html.match(/<script>([\s\S]*?)<\/script>/) || [, ''])[1];
+  _mss2 = '(function(){var st=document.createElement("style");st.textContent='
+    + JSON.stringify(css) + ';document.head.appendChild(st);})();\n' + js;
+  return _mss2;
+}
+app.get('/mss2.js', (req, res) => {
+  try {
+    res.set('Content-Type', 'application/javascript; charset=utf-8');
+    res.set('Cache-Control', 'public, max-age=300');
+    res.set('Access-Control-Allow-Origin', '*');
+    res.send(mss2Body());
+  } catch (e) {
+    console.error(e);
+    res.status(500).send('// mss2 error');
+  }
+});
+
 // === Бренди товару + кількість моделей (для випадайки зліва) ===
 // GET /api/brands?sku=DEMO123 → { total, brands:[{brand,count}] }
 app.get('/api/brands', limiter, async (req, res) => {
