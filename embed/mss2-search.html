@@ -1,0 +1,343 @@
+<!-- ============================================================================
+     ПОВНОЕКРАННИЙ пошук lartek.com.ua на власному Meilisearch (модалка поверх сайту).
+     Куди вставити: Horoshop → Адмінка → «Скрипти перед </body>» → весь цей блок.
+     Перед цим:
+       1) прибрати з <head> рядок smartsearch:
+          <script src="https://smartsearch.com.ua/js/lartek" defer></script>
+       2) якщо раніше ставив мій дропдаун (horoshop-overlay.html) — прибери його,
+          цей блок його замінює.
+     Використовує ТІЛЬКИ search-only ключ (безпечно для браузера).
+     ============================================================================ -->
+<style>
+  .mss2-modal{position:fixed;inset:0;z-index:2147483000;background:rgba(2,6,23,.5);display:none;overflow-y:auto;
+    padding:14px 12px 40px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#1c2530}
+  .mss2-modal.mss2-open{display:block}
+  .mss2-wrap{max-width:1600px;margin:0 auto;background:#eef1f6;border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.45);padding:12px}
+  .mss2-top{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #e6e9ee;border-radius:10px;padding:14px 18px;margin-bottom:12px;position:sticky;top:0;z-index:2;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+  .mss2-top svg{flex:none;color:#6b7480;width:33px;height:33px}
+  .mss2-top input{border:0;outline:0;font-size:33px;font-weight:500;width:100%;color:#1c2530;background:transparent}
+  .mss2-top input::placeholder{font-weight:400;color:#9aa2ad}
+  .mss2-x{flex:none;cursor:pointer;color:#6b7480;font-size:33px;line-height:1;padding:0 4px}
+  .mss2-controls{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 2px 10px;flex-wrap:wrap}
+  .mss2-cattoggle{display:none;align-items:center;justify-content:space-between;gap:8px;width:100%;background:#fff;border:1px solid #e6e9ee;border-radius:10px;padding:12px 14px;font-size:16px;font-weight:600;color:#16315e;cursor:pointer;margin-bottom:10px}
+  .mss2-cattoggle .mss2-arw{color:#6b7480;font-size:14px}
+  .mss2-count{color:#6b7480;font-size:16px}
+  .mss2-note{color:#1f4a8a;font-size:16px}
+  .mss2-grid{display:grid;grid-template-columns:290px 1fr;gap:14px}
+  .mss2-grid.mss2-noside{grid-template-columns:1fr}
+  .mss2-side:empty{display:none}
+  .mss2-side{background:#fff;border:1px solid #e6e9ee;border-radius:12px;padding:8px;align-self:start}
+  .mss2-side h3{margin:4px 8px 8px;font-size:15px;color:#6b7480;font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+  .mss2-cat{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:11px 12px;border-radius:8px;cursor:pointer;font-size:18px}
+  .mss2-cat:hover{background:#f4f6f9}
+  .mss2-cat.mss2-active{background:#16315e;color:#fff}
+  .mss2-cnt{font-size:15px;color:#6b7480;background:#f4f6f9;border-radius:20px;padding:1px 10px;min-width:36px;text-align:center}
+  .mss2-cat.mss2-active .mss2-cnt{color:#fff;background:rgba(255,255,255,.18)}
+  .mss2-catlabel{display:inline-flex;align-items:center;gap:10px;min-width:0}
+  .mss2-ico{flex:none;width:26px;text-align:center;font-size:20px;line-height:1}
+  .mss2-catimg2{flex:none;width:36px;height:36px;border-radius:8px;object-fit:cover;border:1px solid #e6e9ee;background:#fff}
+  .mss2-cat.mss2-active .mss2-catimg2{border-color:rgba(255,255,255,.5)}
+  .mss2-results{min-width:0}
+  .mss2-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;align-items:start}
+  .mss2-blocks{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:20px;align-items:start}
+  .mss2-bh{display:flex;justify-content:space-between;align-items:center;gap:10px;border-bottom:1px solid #e6e9ee;padding-bottom:8px;margin:0 0 10px;cursor:pointer}
+  .mss2-bh b{font-size:19px;font-weight:600}
+  .mss2-bhname{display:inline-flex;align-items:center;gap:9px;min-width:0}
+  .mss2-catimg{width:40px;height:40px;border-radius:7px;object-fit:contain;border:1px solid #e6e9ee;background:#fff;flex:none}
+  .mss2-bh .mss2-arr{font-size:16px;color:#1f4a8a;white-space:nowrap}
+  .mss2-showall{margin-top:6px;color:#1f4a8a;font-size:16px;cursor:pointer}
+  .mss2-item{display:flex;gap:12px;align-items:flex-start;background:#fff;border:1px solid #e6e9ee;border-radius:12px;padding:10px;margin-bottom:8px}
+  .mss2-item.mss2-kbd{outline:2px solid #16315e;outline-offset:1px}
+  /* Немає в наявності — приглушено сірим (товар видно й клікабельний, але не акцентований) */
+  .mss2-item.mss2-off{background:#f5f6f8;border-color:#e9ebef}
+  .mss2-item.mss2-off .mss2-thumb,.mss2-item.mss2-off .mss2-ph{filter:grayscale(1);opacity:.7}
+  .mss2-item.mss2-off .mss2-name{color:#8a929d}
+  .mss2-item.mss2-off .mss2-name:hover{color:#5a6270}
+  .mss2-item.mss2-off .mss2-price{color:#98a0ab;font-weight:600}
+  .mss2-sep{grid-column:1/-1;display:flex;align-items:center;gap:9px;margin:6px 2px 2px;font-size:14px;font-weight:700;color:#8a929d;letter-spacing:.02em}
+  .mss2-sep::after{content:"";flex:1;height:1px;background:#e6e9ee}
+  .mss2-sep .mss2-dot{width:8px;height:8px}
+  .mss2-thumb{width:60px;height:60px;flex:none;border-radius:8px;border:1px solid #e6e9ee;object-fit:contain;background:#fff}
+  .mss2-ph{width:60px;height:60px;flex:none;border-radius:8px;background:#f0f1f3;display:flex;align-items:center;justify-content:center;color:#aab0b8}
+  .mss2-info{min-width:0;flex:1}
+  .mss2-name{font-size:16px;font-weight:600;line-height:1.35;color:#1c2530;display:block}
+  .mss2-name:hover{color:#1f4a8a}
+  .mss2-price{font-size:18px;font-weight:700;color:#1c2530;margin-top:2px}
+  .mss2-status{font-size:15px;color:#6b7480;margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .mss2-art{cursor:pointer;border-bottom:1px dashed #e6e9ee}
+  .mss2-dot{width:9px;height:9px;border-radius:50%;flex:none;display:inline-block}
+  .mss2-dot.ok{background:#19a463}.mss2-dot.off{background:#e11900}
+  .mss2-av{display:inline-flex;align-items:center;gap:6px}
+  .mss2-av.off{color:#e11900;font-weight:600}
+  .mss2-more{display:block;width:100%;background:#fff;color:#16315e;border:1px solid #16315e;border-radius:10px;padding:14px;font-size:18px;cursor:pointer;margin-top:4px}
+  .mss2-empty{color:#6b7480;text-align:center;padding:40px 10px;font-size:16px}
+  .mss2-rt{font-size:16px;color:#6b7480;margin:6px 2px 10px}
+  .mss2-chips{display:flex;flex-wrap:wrap;gap:8px}
+  .mss2-chip{background:#fff;border:1px solid #e6e9ee;border-radius:20px;padding:8px 16px;font-size:16px;cursor:pointer}
+  .mss2-chip:hover{border-color:#16315e;color:#16315e}
+  .mss2-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1c2530;color:#fff;padding:11px 18px;border-radius:8px;font-size:16px;opacity:0;transition:.2s;pointer-events:none;z-index:2147483001}
+  .mss2-toast.mss2-show{opacity:1}
+  .search__results,.search-results{display:none!important} /* глушимо рідний список Horoshop (десктоп + мобільний) */
+  @media(max-width:720px){
+    .mss2-modal{padding:10px 8px 30px}
+    .mss2-grid{grid-template-columns:1fr}
+    .mss2-cards{grid-template-columns:1fr}
+    .mss2-blocks{grid-template-columns:1fr;gap:14px}
+    .mss2-cattoggle.mss2-show{display:flex}
+    .mss2-side{display:none}
+    .mss2-grid.mss2-catopen .mss2-side{display:block;max-height:55vh;overflow-y:auto;margin-bottom:12px}
+    .mss2-top{padding:12px 14px}
+    .mss2-top input{font-size:22px}
+    .mss2-top svg{width:24px;height:24px}
+    .mss2-x{font-size:30px}
+  }
+</style>
+<script>
+(function(){
+  var HOST='https://getmeilimeilisearchv190-production-7c60.up.railway.app';
+  var KEY='018c2bbb344df2da9b898c089ad7b067c5b780d1a619024b14fc8909b728e4e2'; // search-only
+  var INDEX='products';
+  // Аналітика: URL прийому логів (barcode-printer). Порожньо = вимкнено.
+  // напр. 'https://barcode-printer.up.railway.app/api/search-log'
+  var LOG_URL='';
+  var CIMG_BASE="https://www.lartek.com.ua/content/images/";
+  var CATIMG={"Фільтри для пилососів": "20/hepa-fyltr-dlia-pylesosa-thomas-195180-95749667377228_+8937bf1da4.jpg", "Клапани для кавомашин": "23/avaryinyi-klapan-davlenyia-dlia-kofevarky-delonghi-7313260161-51747437008698_+2310f25a11.png", "Зарядні пристрої для пилососів": "26/adapter-dlia-akkumuliatornoho-pylesosa-rowenta-fs-9100029896-26v-550ma-84159870915164_+bc08e36429.jpg", "Лотки для м'ясорубок": "31/22224683477237_+0f6093d218.png", "Ребра барабана для пральних машин": "37/aktyvator-rebro-barabana-dlia-styralnoi-mashyny-indesit-c00268109-17317832837629_+6867360507.jpg", "Амортизатори для пральних машин": "42/amortyzatory-dlia-pralnoi-mashyny-whirlpool-481246648088-83718440581662_+7238278a5a.jpg", "Антивібраційні підставки для пральної машини": "14/antyvybratsyonnye-podstavky-dlia-styralnoi-mashyny-d45mm-4sht.-skl-lft003un-pa-001-73716463830446_+f73290460d.jpg", "Терки , кубикорізки, насадки для м'ясорубок": "18/baraban-terka-dlia-miasorubky-zelmer-86.4060-dlia-syra-y-derunov-41332052619483_+86ca67e65e.jpg", "Блендерные ніжки": "30/blenderna-nizhka-dlia-blendera-bosch-12010878-89468597013621_+1744df9cc9.jpg", "Запчастини для міксерів": "49/blendernaia-nozhka-dlia-myksera-zelmer-481.2000-17035173173477_+fdc432bd2e.jpg", "Зарядні блоки": "50/blok-pytanyia-mashynok-dlia-brytv-trymerov-philips-kod-a00390-vylka-eu-42288251053622_+868565470b.png", "Блоки підшипників для пральних машин": "2/blok-podshypnykov-6204-2z-dlia-styralnoi-mashyny-electrolux-zanussi-4071306502-cod.061-48164795429531_+7ed3ddeecf.jpg", "Блоки електрозапалювання для газової плити": "13/blok-elektropodzhyha-dlia-hazovoi-plyty-na-6-svech-wac-6b-67431045479615_+78ded01798.jpg", "Запчастини для кавоварок": "16/boiler-v-sbore-s-tenom-dlia-kofemashyny-delonghi-1400w-5513214291-5513236251-82508934078230_+e0414f000d.jpg", "Болти для пральних машин": "19/bolt-kreplenyia-krestovyny-dlia-styralnoi-mashyny-lg-samsung-m8x30-16112316854898_+0e7a4539c1.jpg", "Бриючі блоки": "21/breiushchyi-blok-dlia-trymera-sovmestymyi-s-philips-bg2000-80704623445382_+4a6b4e2002.jpg", "Бритвенні головки в зборі": "31/brytvennaia-holovka-v-sbore-dlia-brytvy-sovmestymye-s-philips-s740-80-88338606770382_+088fe8451b.jpg", "Бриючі головки": "34/brytveni-holivky-dlia-brytvy-sumisni-z-philips-hq64-hq54-91468246380002_+6fd0b5fab5.jpg", "Запчастини для хлібопічки": "35/val-vedra-v-sbore-dlia-khlebopechky-lg-8x42mm-85334337752553_+b484777f23.png", "Відра для хлібопічок": "39/vedro-dlia-khlebopechky-kenwood-bm250-bm256-bm260-kw715072-14623786587286_+90f0b4fa64.png", "Віночки для блендера": "1/venchyk-meshalka-dlia-blendera-braun-as00004189-64189652-86358309721919_+99e1a799e0.jpg", "Віночки для кухонних комбайнів": "12/venchyk-dlia-kukhonnoho-kombaina-kenwood-kw717151-12068743872581_+0f6a4dabc3.jpg", "Вінчики для міксерів": "20/venchyky-dlia-myksera-braun-2sht-7322211054-20165747086305_+e16390b505.jpg", "Тертки для кухонних комбайнів": "30/vstavka-terka-dlia-derunov-dlia-kukhonnomu-kombainu-zelmer-877.0240-00756698-78397013118158_+c193dd1dd4.jpg", "Розсікачі та кришки для газових плит": "18/horelka-rassekatel-bolshaia-dlia-hazovoi-plyty-hansa-8071832-46544353399330_+6576c24f30.jpg", "Датчики для холодильників": "24/datchyk-ottaiky-dlia-kholodylnyka-samsung-da47-10150e-76355359348926_+8754cd6175.png", "Запчастини для пральних машин": "33/datchyk-kholla-takhodatchyk-dlia-styralnoi-mashyny-lg-6501kw2001a-60258021247234_+4655e0f6b0.jpg", "Двигуни для м'ясорубок": "39/dvyhatel-v-sbore-s-reduktorom-dlia-miasorubky-moulinex-ms-651371-37300306920210_+c139e9b69f.jpg", "Двигуни для кухонних комбайнів": "42/dvyhatel-dlia-kukh.-kombaina-braun-k700-fx3030-600w-7322010874-novoho-obraztsa-98924778553937_+81a2719892.jpg", "Двигуни (мотори)": "48/dvyhun-dlia-myiuchoho-pylososu-ametek-061300524-1200w-38557238969345_+0a2383735c.png", "Запчастини для бритв": "48/derzhatel-holovok-dlia-brytvy-sovmestymye-s-philips-90650182989658_+f4f250b9ff.jpg", "Тримачі мішка": "10/derzhatel-meshka-dlia-pylesosa-samsung-dj61-00935a-77642967623944_+f96f1ebdd8.jpg", "Корпусні запчастини для пилососів": "17/derzhatel-nera-fyltra-dlia-pylesosov-thomas-staroho-obraztsa-195170-15966314373194_+af8ebdbfb5.jpg", "Тримач терок для кухонного комбайна": "18/derzhatel-terok-dlia-kombaina-braun-k700-fx3030-67051145-33918498642809_+968b31f758.jpg", "Тримачі фільтрів для кавоварок": "22/derzhatel-fyltra-rozhok-dlia-kofevarky-delonghi-5513201079-46449248374585_+d880532456.png", "Запчастини для кавомолок": "47/zhernov-verkhnyi-dlia-kofemolky-delonghi-mc1002-53354113907067_+9fad841280.jpg", "Заварювальні блоки": "50/zavarochnyi-blok-dlia-kofemashyny-delonghi-7313251441-58603375996433_+d299e40c21.jpg", "Тени для пральних машин": "2/zahlushka-otvoru-tena-dlia-pralnoi-mashyny-d-10-mm-99015009511254_+5199ccdf10.jpg", "Замки дверей для пральних машин": "8/zamok-liuka-dveri-dlia-pralnoi-mashyny-bosch-00633765-emz-eg-380710-9000735664-23942882879515_+f4da1a76c2.jpg", "Корпуси терок для м'ясорубки": "26/zashcholka-korpusu-trymacha-terok-zelmer-986.7002-35167979892222_+87afd0f0ac.jpg", "Запчастини для мультиварок": "27/zashchelka-kryshky-multyvarky-moulinex-ss-993160-47935537338877_+c56faee6da.jpg", "Засувка для пилососів": "28/kriplennia-shlanhu-dlia-pylososu-samsung-dj61-00035b-32482972501759_+8c0af28a58.jpg", "Чаші-подрібнювачі в зборі": "31/yzmelchytel-dlia-blendera-bosch-00657247-450ml-38803617795062_+c2431717f5.jpg", "Капучинатори , молочники для кавоварок": "36/97773068860662_+ac39d06cac.jpg", "Запчастини для праски": "42/katushka-elektromahnytnoho-klapana-dlia-paroheneratora-rowenta-ceme-type-xif-cs-00098530-62700024702460_+61428cdb0b.jpg", "Парові клапани та запчастини до них": "46/klapan-blokyrovky-kryshky-dlia-multyvarky-moulinex-ss-994567-41216874692551_+b9c5742fd4.png", "Клапани подавання води для пральних машин": "1/klapan-podachy-vody-1-90-dlia-styralnoi-mashyny-whirlpool-481981729326-68304200544625_+c80e76bd73.png", "Запчастини для плит і духовок": "12/klapan-elektromahnytnyi-dlia-hazovoi-plyty-gorenje-639281-bosch-00421258-93181248677600_+f1facec6d7.png", "Електромагнітні клапани для кавомашин": "14/klapan-elektromahnytnyi-dlia-kofevarky-delonghi-5220vn27p12aif-5213218311-64281137507461_+fe6391082f.jpg", "Вимикачі, кнопки для м'ясорубок": "19/knopka-vkliuchenyia-dlia-miasorubky-moulinex-ss-192332-15505780364575_+a755d6af3c.jpg", "Муфти для кухонного комбайна": "27/komplekt-muft-dlia-osnovnoi-chashi-kombainu-braun-67051112-69063115443045_+1efc462d82.png", "Підшипники для пральних машин": "33/komplekt-pidshypnykiv-skf-i-salnyk-6205620637669.5-12-dlia-pralnoi-mashyny-lg-18244632205735_+257fade0e7.jpg", "Контейнери для води, кофемашин": "14/konteiner-bachok-dlia-vody-kofevarky-delonghi-7313254481-as13200255-98141551105904_+cb4aced0c1.jpg", "Контейнери для пилососів": "23/konteiner-dlia-vody-dlia-robota-pylososa-rowenta-rs-2230002322-16896063367406_+5be7509ce0.png", "Сита-фільтри для кавоварок": "1/krema-fyltr-na-dve-portsyy-dlia-kofevarky-delonghi-as00001314-92233230705910_+ed36a32f16.jpg", "Ручки дверей для холодильників": "8/kreplenyia-verkhnei-ruchky-dvery-dlia-kholodylnyka-liebherr-9590190-91158930005006_+c0fd922999.jpg", "Хрестовини для пральних машин": "10/krestovyna-baka-dlia-styralnoi-mashyny-lg-4434er1004b-ebi-cod.726-94460469588695_+2e9dd20cf2.jpg", "Кришки блендера": "22/kryshka-reduktor-dlia-blendera-moulinex-seryi-500ml-ms-652229-37782210356165_+aeacc48e9f.jpg", "Кришки для чаш кухонних комбайнів": "32/kryshka-dlia-metalycheskoi-chashy-kukhonnoho-kombaina-kenwood-kw716524-45581912456056_+8262b9aefc.jpg", "Запчастини для пароварок": "34/kryshka-dlia-parovarky-braun-7323610024-79362339041495_+99d6455cd4.jpg", "Кришки контейнерів для кавомашин": "40/kryshka-konteinera-dlia-vody-dlia-kofevarky-delonghi-5313251461-59327520624195_+0810e193fb.jpg", "Кришки для соковижималки": "47/kryshka-korpusa-dlia-sokovyzhymalky-kenwood-kw713447-69216644484614_+39b31414e4.png", "Кришки піддонів для кавомашин": "9/kryshka-poddona-dlia-kofemashyny-delonghi-5332164000-71780421214874_+b65607d641.jpg", "Ручки дверей (люка) для пральних машин": "35/kriuchok-dvery-dlia-styralnoi-mashyny-zanussi-4055113437-94701631570874_+353d542ed0.jpg", "Лампочки та кришка плафона для духовок": "40/lampochka-dlia-dukhovky-15w-e14-300-s-90833211190498_+ed7ecb7d92.jpeg", "Лампочки для холодильників": "43/lampochka-dlia-kholodylnyka-15w-e14-81701390455689_+11ab5132bf.jpg", "Лопатки для хлібопічок": "46/lopatka-dlia-khlebopechky-kenwood-bm250-bm450-kw712246-75353512526342_+915d340583.jpg", "Магнетрон для НВЧ-печі": "6/mahnetron-dlia-svch-pechy-samsung-om75p31-85727407139331_+bc062d4148.jpeg", "Манжети (гуми) люка для пральних машин": "8/manzheta-liuka-dlia-styralnoi-mashyny-beko-2904520100-85634900284209_+770e714694.jpg", "Одноразові мішки": "31/meshky-bumazhnye-dlia-pylesosa-zelmer-syrius-orion-5-sht.-34483117412672_+31d0d3d8ea.jpg", "Багаторазові мішки": "31/meshok-dlia-pylesosa-bosch-ft-01-mnohorazovyi-33164352542097_+92b4e01b56.jpg", "Плати для кухонних комбайнів": "14/modul-plata-upravlenyia-dlia-kukhonnoho-kombaina-kenwood-kw717074-55158278849759_+3292c8e1ea.jpg", "Двигуни і моторні блоки": "19/motornyi-blok-blendera-braun-600w-2-knopky-7322110654-40803820348297_+4d9bf1b25a.jpg", "Муфти для блендерів": "29/mufta-blendernoi-nozhky-dlia-blendera-braun-67050811-14512775639684_+53b9302179.jpg", "Шестерні для міксерів": "32/mufta-dvyhatelia-dlia-myksera-moulinex-ss-193927-37905072485283_+862c200ec6.png", "Муфти для м'ясорубок": "1/mufta-predokhranytelnaia-dlia-miasorubky-bosch-00753348-aliumynyevaia-84514606545906_+1e80b3ffee.jpg", "Ножі для м'ясорубок": "27/nabor-nozhei-dvukhstoronnykh-dlia-miasorubky-zelmer-5-zmma025x-a861009-14287218255078_+aeeaec5366.jpg", "Насадки для пилососів": "21/nabor-shchetok-dlia-ochystky-parom-dlia-pylesosa-rowenta-zr850003-74806369053145_+e14b4fda01.jpg", "Гайки тубуса ,зажимние кільця для м'ясорубок": "24/nakatnaia-haika-dlia-miasorubky-moulinex-ss-989842-58166503766253_+9eb564e345.jpg", "Запчастини для м'ясорубок": "45/nasadka-dlia-kolbasy-miasorubky-zelmer-00798576-86.1004-49302238193021_+b157f81e78.png", "Насадки на машинки для стрижки": "5/nasadka-na-mashynky-dlia-stryzhky-philips-422203630751-cp0406-01-83266798184567_+81ee8dea7b.jpg", "Помпи (насоси) для пральних машин": "18/nasos-pompa-dlia-styralnoi-mashyny-askoll-m332-t2107-30w-49357656210529_+6ac2734154.jpg", "Ножі для блендерів": "41/nozh-yzmelchytel-v-sbore-dlia-stats.-blendera-braun-as00000033-26568822243082_+6160c0bde9.jpg", "Ножі для соковичавниць": "44/nozh-syto-dlia-sokovyzhymalky-braun-67051120-16751493981304_+a5ba949637.png", "Ножі для кухонного комбайна": "46/nozh-blendernoi-chashy-kukhonnoho-kombaina-braun-67051167-19631050728901_+851a08fcd1.jpg", "Ніжки для пральної машини": "48/nozhka-unyversalnaia-dlia-styralnoi-mashyny-m101.5-dyametr-40-mm-60083756399839_+cdf6fbe95f.jpg", "Опори барабана для пральних машин": "1/opory-flantsi-barabana-dlia-pralnoi-mashyny-whirlpoolebi-cod.085480110100802-66080148706157_+eaef1ebc54.jpg", "Панелі для електрогриля": "7/panel-zharochnaia-nyzhniaia-dlia-elektrohrylia-tefal-chernyi-ts-01039400-14868091865146_+d7e73aaa99.jpg", "Патрубки для пральних машин": "24/patrubok-bak-nasos-dlia-styralnoi-mashyny-samsung-dc67-00335a-88607943926869_+c83f069b5a.jpg", "Перемикачі режимів для духової шафи": "38/perekliuchatel-rezhymov-dlia-dukhovky-samsung-dg34-00008a-44610570510706_+914d4acc6e.jpg", "Перехідники, з'єднувачі для кавоварок": "48/perekhodnyk-na-kapuchynator-dlia-kofemashyny-delonghi-7313244781-69167747729200_+7c34399c8a.jpg", "Петлі для пральної машини": "3/petlia-dvery-liuka-dlia-styralnoi-mashyny-lg-4774en2001a-46516817057656_+f75d6d8e14.jpg", "Плати , модулі управління для пилососів": "16/plata-tyrystora-dlia-pylesosa-zelmer-919.0350-20858059655596_+c4a5b4b73c.jpg", "Модулі (плати управління)": "27/plata-upravlenyia-s-knopkoi-dlia-miasorubky-zelmer-987.0020-67360629710498_+3e39e67400.jpg", "Піддони для гриля": "30/poddon-dlia-hrylia-tefal-xl-ts-01041550-18833041897753_+95f872c352.jpg", "Помпи для кавоварок": "46/pompa-dlia-kofevarky-48w-ulka-e-type-ex7-230v-spinel-mg071-2-22403929919223_+13d04e6f21.jpg", "Поршні термоблоки для кавомашин": "6/porshen-termobloka-dlia-kofemashyny-delonghi-as13200007-5513227991-7313217501-77401226773738_+1b97c8b938.jpg", "Запобіжники для НВЧ": "12/predokhranytel-keramycheskyi-dlia-svch-pechy-125a-6x30mm-12869196952652_+c4bc68b3c0.jpg", "Прокладки для кавоварок": "17/prokladka-o-ring-dlia-kofevarky-delonghi-5313217761-66681278880865_+f65b47b922.jpg", "Шестерні для м'ясорубок": "22/prokladka-bolshoi-shesterny-dlia-miasorubky-zelmer-755425-88096268869390_+933b15c75b.png", "Чаші для кухонних комбайнів": "30/prokladka-uplotnytelnaia-dlia-blendera-braun-7322310504-as00000027-16300366611462_+e9f9e758a9.jpg", "Запчастини для посудомийної машини": "35/pruzhyna-dvery-s-tiahoi-dlia-posudomoechnoi-mashyny-bosch-00754869-2-sht-45423750965539_+c7dd8200e9.jpg", "Витратоміри води для кавоварок": "41/raskhodomer-vody-floumetr-dlia-kofevarky-delonghi-5213225251-76045238938719_+8fc94e8151.jpg", "Редуктори віночків для блендерів": "3/reduktor-dlia-venchyka-blendera-braun-mr10-67050148-45806054660115_+e8a6b6e8eb.jpg", "Редуктори для м'ясорубок": "7/reduktor-dlia-miasorubky-moulinex-hv8-ss-1530000563-37072904789468_+805d2d7747.jpg", "Реле рівня води": "33/rele-urovnia-vody-pressostat-dlia-styralnoi-mashyny-lg-6601en1005j-71637934142307_+45f5ff7df5.jpg", "Ремні для кухонних комбайнів": "35/remen-3mr-426-9-dlia-kukhonnoho-kombaina-kenwood-kw674722-22858826616627_+bdce16e967.jpg", "Ремні для пральних машин": "41/remen-dlia-styralnoi-mashyny-beko-2466300200-hutchinson-1244j4-pje-42244333387657_+bb893422f3.jpg", "Ремні для хлібопічок": "4/remen-dlia-khlebopechky-90s3m537-delonghi-eh1434-80952309957649_+bdb52e79bf.jpg", "Решітки для м'ясорубок": "18/reshetka-dlia-kolbasy-dlia-miasorubky-zelmer-5-65475991021509_+a61d189906.jpg", "Запчастини для кухонних комбайнів": "37/rolyk-natiazhnoi-dlia-kukhonnoho-kombaina-braun-67002044-82983287510545_+8a01e9e7cf.png", "Ручки для пилососів": "8/ruchka-dlia-pylesosa-rowenta-rs-rt900613-59104419699035_+9be3cc1ba6.jpg", "Ручки перемикання програм": "30/ruchka-perekliuchenyia-prohram-dlia-styralnoi-mashyny-sovmestymaia-s-whirlpool-481241458306-77689343131819_+5b681dcb2a.jpg", "Ручки регулювання": "31/ruchka-rehulyrovky-dlia-varochnoi-panely-hansa-1021712-58781545351584_+e77f00f2c8.png", "Сальники для пральних машин": "42/salnyk-254710-11.5-dlia-styralnoi-mashyny-gorenje-ric.el-92445469-19531731130133_+5d3ee4d1f9.png", "Свічки електропідпалювання": "14/svecha-podzhyha-dlia-hazovoi-plyty-gorenje-162122-l400mm-71019493150355_+988362b71d.jpg", "Сітки для бритв": "21/setka-dlia-brytvy-braun-30b-34097760256325_+ae82cd035e.jpg", "Слюда для НВЧ-печі": "30/sliuda-dlia-mykrovolnovoi-pechy-125kh200-mm-lyst-44191363960445_+8da60f5ad4.jpg", "Мастило для пральних машин": "32/smazka-dlia-salnykov-50g-ebi-cod.399-62731420544578_+faf9e12527.jpg", "Мірні склянки для блендерів": "7/stakan-mernyi-dlia-blendera-moulinex-ms-651614-800ml-49994205944773_+ec0c9d88c7.jpg", "Запчастини для холодильників": "12/taimer-ottaiky-k-kholodylnyku-indesit-c00277063-c00298587-unybob-01n-v-c00851086-23091558727220_+48658721ee.png", "Тарілки для мікрохвильових печей": "14/tarelka-dlia-svch-lg-d245mm-pod-kupler-3390w1g005h-72217114991235_+b39b573173.jpg", "Термопари для духових шаф": "32/termopara-dlia-hazovoi-plyty-unyversalnaia-1200mm-40675712007881_+e63b038665.jpg", "Термостати для духових шаф": "40/termostat-285c-dukhovky-beko-ego-55.17053.030-263100015-280cm-66772398287102_+2d1cb2b312.jpg", "Термостати для холодильників": "42/termostat-k57-l2829-morozylnoi-kamery-dlia-kholodylnyka-indesit-c00851095-46649080097554_+e4c1e22877.jpg", "Штовхачі для кухонних комбайнів": "12/tolkatel-dlia-kukhonnoho-kombaina-braun-67051073-97326044870338_+2c39b34482.jpg", "Штовхачі для м'ясорубок": "17/tolkatel-dlia-miasorubky-zelmer-886.0056-32639115051604_+3fe9675cd4.jpg", "Труби для пилососів": "22/truba-teleskop-32mm-dlia-pylesosa-18182567649690_+8be1513a65.jpg", "Трубки для кавоварок": "37/trubka-molochnyka-dlia-kofemashyny-delonghi-5332131100-46479532165159_+a0fae5b52a.jpg", "Тубуси для м'ясорубок": "42/tubus-dlia-miasorubky-moulinex-hv8-ss-193512-34078786310006_+82bfed9a1b.jpg", "Щітки для пилососів": "50/turboshchetka-dlia-pylesosa-unyversalnaia-rozbornaia-71852824660921_+3f3a8664b1.jpg", "Тен для гриля": "5/ten-dlia-hrylia-1000w-delonghi-mv90511000-61592843137295_+18c33fd35a.jpg", "Тени для духовок": "30/ten-nyzhnyi-dlia-dukhovky-ardo-524012200-1600w-360mm-18994644222763_+d4d8f51f69.jpg", "Тени для кавоварок": "36/ten-protochnyi-dlia-kofemashyny-delonghi-5513227931-7332196700-1000w-44032590143329_+6265509375.jpg", "Тени для бойлера": "39/ten-sukhoi-dlia-boilera-kaneta-800w-l345mm-99010024262330_+fe2a4188bc.jpg", "Ущільнювачі (прокладки)": "8/uplotnytel-predokhranytelnoho-klapana-dlia-multyvarky-moulinex-ss-994464-40350223367430_+45d74c6bac.jpg", "Фільтри насоса для пральних машин": "41/fyltr-nasosa-dlia-styralnoi-mashyny-lg-383eer2001a-16357093429271_+da1060eb0e.jpg", "Фільтри очищення води для кавоварок": "44/fyltr-ochystky-vody-dlia-kofevarky-saeco-144650300-19680356215714_+d3d2dd0c3c.jpg", "Фільтри для сушильної машини": "50/fyltr-setchatyi-dlia-sushylnoi-mashyny-bosch-00652184-28397590228180_+4d62438b5e.jpg", "Чаші для блендерів": "42/chasha-yzmelchytelia-dlia-blendera-braun-1500ml-67051021-96559200538121_+a008c1564f.jpg", "Хімія для миючого пилососа": "5/shampun-penohasytel-dlia-pylesosa-zelmer-311724-919.0190-zvca080x-49670871160615_+d6a666ec09.jpg", "Шестерні для кухонних комбайнів": "29/shesternia-malaia-s-valom-dlia-kukhonnoho-kombaina-kenwood-kw717213-kw712145-35367220029318_+cb4459eb3a.jpg", "Шланги для пилососів": "45/shlanh-v-sbore-dlia-pylesosa-rowenta-tefal-rs-rt900073-41587286911850_+03e58e602a.jpg", "Шнеки для м'ясорубок": "23/shnek-pod-odnostoronnyi-nozh-dlia-miasorubky-zelmer-nr8-86.3130-12000133-11271426971580_+1a0710e2c4.jpg", "Запчастини для блендерів": "46/shtok-v-chashu-dlia-blendera-moulinex-ms-651633-53339205550747_+3f7a84c7c3.jpg", "Щітки для пральних машин": "33/shchetky-dvyhatelia-2sht-dlia-styralnoi-mashyny-bosch-00154740-2sht-38417369441551_+c14f8459ba.jpg", "Конденсатори для СВЧ": "10/2501-001015-95257364329627_+9de037a22b.jpg", "Набори для коптилень": "12/dvyhun-ventyliatora-konvektsii-krylchatka-ten-konvektsii-dlia-koptylni-94691892501067_+a9dee0342f.jpg", "Аноди для бойлерів": "30/mahnyevyi-anod-dlia-boilera-na-dlynnoi-nozhke-m5-93530793728944_+735cb3dd6e.jpg", "Тени конвекції": "33/c00084399-29910002248499_+d80a551e86.jpg", "Механічні таймери для духовки": "9/taimer-saturn-st-ec1075-70481835174982_+80b2c22739.jpg", "Прокладки для бойлера": "33/prokladka-pod-flanets-boilera-gorenje-482939-original-66774004818252_+2df175fccd.jpg", "Тени для посудомийних машин": "48/12019637-30.73400.032-84717280821952_+170b657f97.png", "Фланці для бойлерів": "3/flanets-pod-sukhye-teny-dlia-boilera-aeg-d180mm-l-trubok-410-410-406mm-95633555061289_+23279a2ce1.jpg", "Засоби по догляду за технікою": "18/sredstvo-skl-dlia-udalenyia-zhyra-y-nakypy-dlia-posudomoechnykh-y-styralnykh-mashyn-11183083475343_+5d72ee1b4d.jpg", "Лампочки для НВЧ-печі": "26/6912w3b002d-31353552122272_+96b2e45377.jpg", "Запчастини для соковижималок": "30/ss-194376-23646470932984_+4cddabff82.jpg", "Пружини барабану для пральних машин": "47/pruzhyna-baka-dlia-styralnykh-mashyn-s-zahruzkoi-52-kh.-samsung-dc61-00708a-59295521541138_+486e1c6e52.jpg", "Заливні та зливні шланги": "50/shlanh-zalyvnoi-dlia-styralnykh-y-posudomoechnykh-mashyn-1.5m-15447998454769_+3add7019c9.jpg", "Запчастини для бойлерів": "34/termostat-otsekatel-dlia-boilera-90s-250v-16a-gorenje-482993-22014091141473_+1989e982b9.jpg", "Регулятори потужності для духових шаф": "1/641982-98954825183742_+18f1c2308d.jpg", "Конфорки": "37/webo-145-50195836913931_+038e3d6b41.jpg", "Пускове реле": "40/puskovoe-rele-dlia-kholodylnyka-mpv-0.9a-uzhhorod-65686961219705_+fe5ca3edea.jpg", "Запчастини для сушильних машин": "24/00632045-50088062269015_+470d62dd65.jpeg", "Шківи для пральної машини": "25/electrolux-1084895000-20759991218323_+fb1edaf998.jpeg", "Насоси (помпы) для посудомийних машин": "28/nasos-pompa-dlia-posudomoechnoi-mashyny-beko-1748200100-25w-b20-6a01-38527505916076_+993d6ffc8d.jpeg", "Чаші": "14/ss-996759-56333550219263_+6ad405176a.jpeg", "Ущільнювачі дверей": "34/v372104-02-390x520mm-snaige-40694242225792_+f390e0325d.jpeg", "Ролери для НВЧ-печі": "39/de97-00193b-50142300610183_+a758e5203b.jpeg", "Мішки для пилососів": "45/meshok-dlia-stantsyy-avtomatycheskoi-ochystky-na-akkumuliatornyi-pylesos-samsung-dj67-00906b-59196367715422_+73e6f78df5.jpg", "Корпусні деталі для пральної машини": "48/verkhniaia-planka-dlia-styralnoi-mashyny-lg-5221fe3076h-20699160718204_+9c75a933c8.jpg", "Конденсатори для пральних машин": "17/kondensator-puskovoi-cbb60-5uf-450vac-83508007147539_+108206cc72.jpg", "Панелі ящика": "35/panel-polky-zony-svezhesty-dlia-kholodylnyka-samsung-da63-03052a-74617468971371_+f5fbd3ed27.jpg", "Полиці для холодильників": "10/d357234-88312114186575_+fcda1322f0.jpg", "Запчастини для мікрохвильовки": "26/hachok-dverei-do-mikrokhvylovoi-pechi-samsung-de64-02355a-25686380938000_+d60c2fd200.jpg", "Запчастини для зубних щіток": "32/adapter-so-shnurom-dlia-elektrycheskoi-zubnoi-shchetky-philips-airfloss-crp241-01-300007732531-43562473654377_+38bc68d516.png", "Запчастини для обігрівачів": "38/vykliuchatel-dlia-maslianoho-obohrevatelia-delonghi-5108007800-14298835443168_+3a5bc9a1cc.png", "Датчики і кабелі для мультиварок": "20/datchyk-blokyrovky-kryshky-dlia-multyvarky-moulinex-ce503-5l-ss-994466-91294504811470_+fd46a201af.jpg", "Запчастини для электрогриля": "27/85551958051914_+9ae3fd9840.jpg", "Тримачі заварювального блока для кавомашин": "50/derzhatel-zavarochnoho-bloka-dlia-kofemashyny-delonghi-7313212631-19982944757563_+1ed38c23fd.jpg", "Тримачі терок для блендерів": "26/dysk-derzhatel-vstavok-dlia-blendera-bosch-00753482-64663801502581_+d9b371571b.jpg", "Замки кришки для мультиварок": "5/zamok-kryshky-dlia-multyvarky-skorovarky-moulinex-ce503132-87a-z-pruzhynoiu-ss-994532-99300352710380_+71fb31b60b.png", "Колби для кавоварок": "21/kolba-kryshka-dlia-kofevarky-bosch-00646860-24515628080035_+3106d96e83.png", "Фільтра для зволожувача": "4/komplekt-fyltrov-dlia-uvlazhnytelia-vozdukha-philips-hu4801-hu4802-2sht-86230830017462_+df6e379bbb.jpg", "Шланги подавання води для пилососа": "7/komplekt-forsunok-dlia-moiushchykh-nasadok-zelmer-bosch-619.0125-12000903-2sht-63500900086909_+324aec7a57.jpg", "Підставки-пароварки": "20/konteiner-dlia-varky-na-paru-dlia-multyvarky-moulinex-ss-995220-19857412568409_+6f41aef5f1.jpg", "Контейнера для конденсату мультиварок": "27/konteiner-dlia-kondensata-multyvarky-moulinex-ss-993440-48264642706896_+c0db508f32.jpg", "Ящики для холодильників": "48/korpus-yashchyka-morozylnoi-kamery-kholodylnyka-atlant-769748401801-verkhnyi-srednyi-75687638704280_+2646d5cf94.png", "Крани подавання води/пара для кавомашин": "49/kran-podachy-vody-para-dlia-kofevarky-delonghi-7313281219-87904194733319_+24f888c90d.jpg", "Штоки, осі для кухонного комбайна": "27/metallycheskyi-shtok-dlia-nasadky-kukhonnoho-kombaina-kenwood-kw714245-26557922687147_+3c1587147f.jpg", "Запчастини для витяжки": "28/mekhanycheskyi-blok-upravlenyia-dlia-vytiazhky-pyramida-876101-1-10900014-21578706135365_+8900e18fce.png", "Насадка, сопло капучинатора": "29/nasadka-trubka-na-kapuchynator-dlia-kofemashyny-delonghi-5313221171-26176937747556_+59a5b65485.jpg", "Насадки для тримерів": "39/nasadka-3-mm-dlia-trymera-rowenta-cs-00116968-88554109276952_+658abb92c7.jpg", "Запчастини для машинок для стрижки волосся": "45/nozh-na-mashynku-dlia-stryzhky-philips-qc5105-qc5115-qc5120-qc5125-75374829475304_+edb2b9a049.jpg", "Модулі (плати)": "10/plata-yndykatsyy-dlia-multyvarky-ce503132-moulinex-ss-994529-36469840828704_+825d005eac.jpg", "Реле для холодильників": "32/rele-teplovoe-dlia-kholodylnyka-indesit-s-termovykliuchatelem-c00258436-71112813514868_+4ed5af5b6a.jpg", "Ручки крана вода/пар для кавомашин": "12/ruchka-krana-voda-par-dlia-kavovarky-delonghi-5513270749-26472031814207_+333851bf92.png", "Термостати для кавомашин": "41/termostat-318c-dlia-kofevarky-delonghi-5232105000-52464829481867_+49217bf3a0.jpg", "Ущільнювачі для духових шаф": "45/uplotnytel-dvery-dukhovky-dlia-plyty-indesit-c00027982-34742234210843_+8173192f28.jpg", "Ущільнювачі для посудомийних машин": "50/uplotnytel-dvery-nyzhnyi-dlia-posudomoechnoi-mashyny-ariston-c00290247-78384553718699_+a1844e745f.jpg", "Запчастини для пилососів": "11/pompa-28-vt.-ep77-ulka-12001005-56647751151862_+8c658a0a19.jpeg"};
+
+  var state={q:'',filterVal:null,catAvailable:null,catDist:{},total:0,offset:0,limit:20,hits:[],kbd:-1,canSort:true};
+  var timer=null, logTimer=null, built=false, q, side, results, countEl, noteEl, modal, gridEl, catToggle;
+
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+  // Легкі мініатюри через безкоштовний ресайзер (200KB -> ~2KB). Якщо недоступний — onerror ховає.
+  function thumb(url,px){ if(!url) return ''; return 'https://wsrv.nl/?url='+encodeURIComponent(url)+'&w='+px+'&h='+px+'&fit=inside&output=webp'; }
+  function fmt(n){return Math.round(n).toLocaleString('uk-UA');}
+  // Канонічний розмір (як в індексаторі): числа сортуються, десятковий -> 'p', роздільник -> 'x'.
+  // 12,5*5*32 = 5*12,5*32 = 5x12,5x32 -> 5x12p5x32 ; 30*52*10 -> 10x30x52 ; 305210 не чіпається.
+  function normDims(s){
+    s=String(s==null?'':s);
+    return s.replace(/(\d+(?:[.,]\d+)?)((?:[ \t]*[*x×хХ·∙•⋅✕✖⨯][ \t]*\d+(?:[.,]\d+)?){1,3})/gi,function(full){
+      var nums=full.split(/[ \t]*[*x×хХ·∙•⋅✕✖⨯][ \t]*/i).map(function(t){return parseFloat(t.replace(',','.'));}).filter(function(v){return !isNaN(v);});
+      if(nums.length<2) return full;
+      nums.sort(function(a,b){return a-b;});
+      return nums.map(function(v){return String(v).replace('.','p');}).join('x');
+    });
+  }
+  // Розміри шукаємо ТОЧНО (без одруківок): канонічний токен обгортаємо в лапки —
+  // Meili робить фразовий пошук, тож 13.5*5 (5x13p5) не збігатиметься з 12.5 (5x12p5).
+  function qNorm(){ return normDims(state.q).replace(/\d+(?:p\d+)?(?:x\d+(?:p\d+)?)+/g,'"$&"'); }
+  function catIco(name){
+    var u=CATIMG[name]; if(!u) return '<span class="mss2-ico">🔧</span>';
+    var full=(u.slice(0,4)==='http')?u:CIMG_BASE+u;
+    return '<img class="mss2-catimg2" loading="lazy" src="'+thumb(full,80)+'" onerror="this.style.display=\'none\'">';
+  }
+  function toast(m){ var t=document.getElementById('mss2-toast'); t.textContent=m; t.classList.add('mss2-show'); setTimeout(function(){t.classList.remove('mss2-show');},1400); }
+
+  function build(){
+    if(built) return; built=true;
+    modal=document.createElement('div'); modal.className='mss2-modal'; modal.id='mss2-modal';
+    modal.innerHTML=''
+      +'<div class="mss2-wrap">'
+      +'  <div class="mss2-top">'
+      +'    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>'
+      +'    <input id="mss2-q" placeholder="Модель техніки або назва деталі…" autocomplete="off">'
+      +'    <span class="mss2-x" id="mss2-x" title="Закрити">&times;</span>'
+      +'  </div>'
+      +'  <div class="mss2-controls"><span class="mss2-count" id="mss2-count">Почни вводити запит</span><span class="mss2-note" id="mss2-note"></span></div>'
+      +'  <button class="mss2-cattoggle" id="mss2-cattoggle"><span class="mss2-catlabel-t">Категорії</span><span class="mss2-arw">▾</span></button>'
+      +'  <div class="mss2-grid"><div class="mss2-side" id="mss2-side"></div>'
+      +'  <div class="mss2-results" id="mss2-results"><div class="mss2-empty">Введи модель або назву деталі — результати з\'являться миттєво.</div></div></div>'
+      +'</div>';
+    document.body.appendChild(modal);
+    var toastEl=document.createElement('div'); toastEl.className='mss2-toast'; toastEl.id='mss2-toast'; document.body.appendChild(toastEl);
+
+    q=modal.querySelector('#mss2-q'); side=modal.querySelector('#mss2-side'); results=modal.querySelector('#mss2-results');
+    gridEl=modal.querySelector('.mss2-grid');
+    countEl=modal.querySelector('#mss2-count'); noteEl=modal.querySelector('#mss2-note');
+    catToggle=modal.querySelector('#mss2-cattoggle');
+    catToggle.onclick=function(){ var open=gridEl.classList.toggle('mss2-catopen'); catToggle.querySelector('.mss2-arw').textContent=open?'▴':'▾'; };
+    q.addEventListener('input',onInput);
+    modal.querySelector('#mss2-x').onclick=close;
+    modal.addEventListener('click',function(e){ if(e.target===modal) close(); });
+    document.addEventListener('keydown',function(e){
+      if(!modal.classList.contains('mss2-open')) return;
+      if(e.key==='Escape'){ close(); return; }
+      if(!['ArrowDown','ArrowUp','Enter'].includes(e.key)) return;
+      var items=[].slice.call(results.querySelectorAll('.mss2-item')); if(!items.length) return;
+      if(e.key==='Enter'){ if(state.kbd>=0&&items[state.kbd]){ var u=items[state.kbd].getAttribute('data-url'); if(u&&u!=='#') location.href=u; } return; }
+      e.preventDefault();
+      if(e.key==='ArrowDown') state.kbd=Math.min((state.kbd<0?-1:state.kbd)+1,items.length-1);
+      else state.kbd=Math.max((state.kbd<0?0:state.kbd)-1,0);
+      items.forEach(function(it,i){it.classList.toggle('mss2-kbd',i===state.kbd);});
+      if(items[state.kbd]) items[state.kbd].scrollIntoView({block:'nearest'});
+    });
+  }
+
+  function open(prefill){
+    build();
+    if(modal.classList.contains('mss2-open')){ q.focus(); return; }
+    modal.classList.add('mss2-open'); document.body.style.overflow='hidden';
+    if(prefill!=null && prefill!==''){ q.value=prefill; onInput(); } else { q.value=''; countEl.textContent='Почни вводити запит'; renderRecentOrEmpty(); }
+    q.focus(); setTimeout(function(){ q.focus(); },30);
+  }
+  function close(){ if(modal) modal.classList.remove('mss2-open'); document.body.style.overflow=''; }
+
+  function search(body){
+    return fetch(HOST+'/indexes/'+INDEX+'/search',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+KEY},body:JSON.stringify(body)})
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); });
+  }
+  function searchSafe(body){
+    return search(body).catch(function(e){ if(body.sort){ var b=Object.assign({},body); delete b.sort; state.canSort=false; return search(b); } throw e; });
+  }
+  function multiSearch(queries){
+    return fetch(HOST+'/multi-search',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+KEY},body:JSON.stringify({queries:queries})})
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }).then(function(d){ return d.results||[]; });
+  }
+  function filters(cat){ var c=(cat!==undefined?cat:state.filterVal); return c?['category = '+JSON.stringify(c)]:undefined; }
+  function sortArr(){ return state.canSort?['available:desc']:undefined; }
+
+  function loadFacets(){
+    if(!state.q){ side.innerHTML=''; if(gridEl) gridEl.classList.add('mss2-noside'); hideCatToggle(); state.total=0; return Promise.resolve(); }
+    return search({q:qNorm(),limit:0,facets:['category'],matchingStrategy:'all'}).then(function(d){ state.catAvailable=true; return d; })
+      .catch(function(){ state.catAvailable=false; return search({q:qNorm(),limit:0,matchingStrategy:'all'}); })
+      .then(function(d){
+        state.catDist=(d.facetDistribution&&d.facetDistribution.category)||{};
+        state.total=d.estimatedTotalHits||0; renderSide();
+        noteEl.textContent=(state.catAvailable===false)?'категорії з\'являться після оновлення каталогу':'';
+      }).catch(function(){});
+  }
+  // мобільний трей категорій
+  function showCatToggle(n){ if(!catToggle) return; catToggle.classList.add('mss2-show'); var l=catToggle.querySelector('.mss2-catlabel-t'); if(l) l.textContent='Категорії ('+n+')'; }
+  function hideCatToggle(){ if(!catToggle) return; catToggle.classList.remove('mss2-show'); closeCatTray(); }
+  function closeCatTray(){ if(gridEl) gridEl.classList.remove('mss2-catopen'); if(catToggle){ var a=catToggle.querySelector('.mss2-arw'); if(a) a.textContent='▾'; } }
+  function renderSide(){
+    var entries=Object.entries(state.catDist).filter(function(e){return e[0]!=='';}).sort(function(a,b){return b[1]-a[1];}).slice(0,60);
+    var html='<h3>Категорії</h3><div class="mss2-cat '+(!state.filterVal?'mss2-active':'')+'" data-v=""><span class="mss2-catlabel"><span class="mss2-ico">📦</span><span>Всі результати</span></span><span class="mss2-cnt">'+state.total+'</span></div>';
+    entries.forEach(function(e){ html+='<div class="mss2-cat '+(state.filterVal===e[0]?'mss2-active':'')+'" data-v="'+esc(e[0])+'"><span class="mss2-catlabel">'+catIco(e[0])+'<span>'+esc(e[0])+'</span></span><span class="mss2-cnt">'+e[1]+'</span></div>'; });
+    side.innerHTML=html; if(gridEl) gridEl.classList.remove('mss2-noside');
+    showCatToggle(entries.length);
+    side.querySelectorAll('.mss2-cat').forEach(function(el){ el.onclick=function(){ state.filterVal=el.getAttribute('data-v')||null; markActive(); closeCatTray(); runSearch(true); }; });
+  }
+  function markActive(){ side.querySelectorAll('.mss2-cat').forEach(function(el){ var v=el.getAttribute('data-v')||null; el.classList.toggle('mss2-active',v===state.filterVal); }); }
+  function grouped(){ return state.q && !state.filterVal; }
+
+  function runSearch(reset){
+    if(!state.q){ renderRecentOrEmpty(); countEl.textContent='Почни вводити запит'; return Promise.resolve(); }
+    return grouped()?renderGrouped():renderFlat(reset);
+  }
+
+  function renderFlat(reset){
+    if(reset){ state.offset=0; state.hits=[]; state.kbd=-1; }
+    var body={q:qNorm(),limit:state.limit,offset:state.offset,matchingStrategy:'all'}; var s=sortArr(); if(s) body.sort=s;
+    var f=filters(); if(f) body.filter=f;
+    return searchSafe(body).then(function(d){
+      state.total=d.estimatedTotalHits||0;
+      state.hits=reset?d.hits:state.hits.concat(d.hits);
+      countEl.textContent='Знайдено: '+state.total;
+      if(reset&&state.hits.length) pushRecent(state.q);
+      var html='';
+      if(!state.hits.length){ html='<div class="mss2-empty">Нічого не знайдено за «'+esc(state.q)+'».</div>'; }
+      else{
+        html='<div class="mss2-cards">';
+        var prevAvail=null;
+        state.hits.forEach(function(h){
+          var a=!!h.available;
+          if(state.canSort && a!==prevAvail){
+            html+='<div class="mss2-sep"><span class="mss2-dot '+(a?'ok':'off')+'"></span>'+(a?'В наявності':'Немає в наявності')+'</div>';
+            prevAvail=a;
+          }
+          html+=card(h);
+        });
+        html+='</div>';
+        if(state.hits.length<state.total) html+='<button class="mss2-more" id="mss2-more">Показати ще ('+(state.total-state.hits.length)+')…</button>';
+      }
+      results.innerHTML=html; bindCards();
+      var m=results.querySelector('#mss2-more'); if(m) m.onclick=function(){ state.offset+=state.limit; renderFlat(false); };
+    }).catch(function(e){ results.innerHTML='<div class="mss2-empty">Помилка з\'єднання ('+e.message+').</div>'; });
+  }
+
+  function renderGrouped(){
+    var cats=Object.entries(state.catDist).filter(function(e){return e[0]!=='';}).sort(function(a,b){return b[1]-a[1];}).slice(0,8);
+    if(!cats.length) return renderFlat(true);
+    var s=sortArr();
+    var queries=cats.map(function(c){ var qy={indexUid:INDEX,q:qNorm(),limit:4,filter:filters(c[0]),matchingStrategy:'all'}; if(s) qy.sort=s; return qy; });
+    return multiSearch(queries).then(function(res){
+      state.kbd=-1; countEl.textContent='Знайдено: '+state.total; pushRecent(state.q);
+      var html='<div class="mss2-blocks">';
+      cats.forEach(function(c,i){
+        var hits=(res[i]&&res[i].hits)||[]; if(!hits.length) return;
+        var cimg=hits[0]&&hits[0].picture;
+        var head='<span class="mss2-bhname">'+(cimg?'<img class="mss2-catimg" src="'+thumb(cimg,72)+'" onerror="this.style.display=\'none\'">':'')+'<b>'+esc(c[0])+'</b></span>';
+        html+='<div class="mss2-block"><div class="mss2-bh" data-v="'+esc(c[0])+'">'+head+'<span class="mss2-arr">Показати всі ('+c[1]+') ›</span></div>';
+        hits.forEach(function(h){ html+=card(h); });
+        html+='</div>';
+      });
+      html+='</div>';
+      if(html==='<div class="mss2-blocks"></div>') html='<div class="mss2-empty">Нічого не знайдено за «'+esc(state.q)+'».</div>';
+      results.innerHTML=html; bindCards();
+      results.querySelectorAll('[data-v]').forEach(function(el){ el.onclick=function(){ state.filterVal=el.getAttribute('data-v'); markActive(); runSearch(true); }; });
+    }).catch(function(){ return renderFlat(true); });
+  }
+
+  function card(h){
+    var pic=h.picture?('<img class="mss2-thumb" loading="lazy" src="'+thumb(h.picture,120)+'" onerror="this.outerHTML=\'<div class=mss2-ph>—</div>\'">'):'<div class="mss2-ph">—</div>';
+    var av=h.available?'<span class="mss2-av ok"><span class="mss2-dot ok"></span> В наявності</span>':'<span class="mss2-av off"><span class="mss2-dot off"></span> Немає в наявності</span>';
+    var price=h.price?(fmt(h.price)+' грн'):'ціна за запитом';
+    var art=h.sku?(' · <span class="mss2-art" data-a="'+esc(h.sku)+'">Код: '+esc(h.sku)+'</span>'):'';
+    var url=h.url||'#';
+    var cls=h.available?'mss2-item':'mss2-item mss2-off';
+    return '<div class="'+cls+'" data-url="'+esc(url)+'">'+pic
+      +'<div class="mss2-info"><a class="mss2-name" href="'+esc(url)+'">'+esc(h.name)+'</a>'
+      +'<div class="mss2-price">'+price+'</div><div class="mss2-status">'+av+art+'</div></div></div>';
+  }
+  function bindCards(){ results.querySelectorAll('.mss2-art').forEach(function(el){ el.onclick=function(ev){ ev.preventDefault(); ev.stopPropagation(); if(navigator.clipboard) navigator.clipboard.writeText(el.getAttribute('data-a')); toast('Код скопійовано: '+el.getAttribute('data-a')); }; }); }
+
+  function getRecent(){ try{ return JSON.parse(localStorage.getItem('ms_recent')||'[]'); }catch(e){ return []; } }
+  function pushRecent(v){ try{ if(!v||v.length<2)return; var r=getRecent().filter(function(x){return x!==v;}); r.unshift(v); localStorage.setItem('ms_recent',JSON.stringify(r.slice(0,8))); }catch(e){} }
+  function renderRecentOrEmpty(){
+    var r=getRecent();
+    if(gridEl) gridEl.classList.add('mss2-noside'); hideCatToggle();
+    if(!r.length){ if(gridEl) gridEl.style.display='none'; return; } // нема історії — лише поле пошуку
+    if(gridEl) gridEl.style.display='';                              // є історія — показуємо панель
+    var html='<div class="mss2-rt">Останні запити</div><div class="mss2-chips">';
+    r.forEach(function(v){ html+='<span class="mss2-chip" data-q="'+esc(v)+'">'+esc(v)+'</span>'; });
+    html+='</div>';
+    if(side) side.innerHTML='';
+    results.innerHTML=html;
+    results.querySelectorAll('.mss2-chip').forEach(function(c){ c.onclick=function(){ q.value=c.getAttribute('data-q'); onInput(); }; });
+  }
+
+  function onInput(){
+    state.q=q.value.trim(); state.filterVal=null;
+    clearTimeout(timer);
+    timer=setTimeout(function(){
+      state.offset=0;
+      if(!state.q){ countEl.textContent='Почни вводити запит'; renderRecentOrEmpty(); return; }
+      if(gridEl) gridEl.style.display=''; loadFacets().then(function(){ runSearch(true); });
+    },150);
+    // аналітика: лог «завершеного» запиту після паузи (не кожну літеру)
+    clearTimeout(logTimer);
+    logTimer=setTimeout(logSearch, 1200);
+  }
+  function logSearch(){
+    if(!LOG_URL) return;
+    var qq=state.q; if(!qq || qq.length<2) return;
+    try{
+      fetch(LOG_URL, { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ q: qq, hits: state.total, source: 'site' }), keepalive:true }).catch(function(){});
+    }catch(e){}
+  }
+
+  // --- Тригер: відкривати модалку з поля пошуку сайту (десктоп + мобільний) ---
+  // Десктоп: input.search__input / .search__button. Мобільний: #search-input у .search__field, лупа .search__toggle.
+  var INPUT_SEL='input.search__input, #search-input, .search__field input, .search input[type="text"], .search input[name="q"]';
+  var TOGGLE_SEL='.search__toggle, .search__button';
+  function isInput(t){ return t && t.matches && t.matches(INPUT_SEL); }
+  function siteInputVal(){ var el=document.querySelector(INPUT_SEL); return el?el.value:''; }
+  document.addEventListener('focusin', function(e){ if(isInput(e.target)) open(e.target.value||''); }, true);
+  document.addEventListener('click', function(e){
+    var t=e.target; if(!t||!t.closest) return;
+    if(isInput(t)){ open(t.value||''); return; }
+    var tg=t.closest(TOGGLE_SEL);
+    if(tg){ e.preventDefault(); e.stopPropagation(); open(siteInputVal()); }
+  }, true);
+})();
+</script>
