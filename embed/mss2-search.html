@@ -217,7 +217,7 @@
     side.querySelectorAll('.mss2-cat').forEach(function(el){ el.onclick=function(){ state.filterVal=el.getAttribute('data-v')||null; markActive(); closeCatTray(); runSearch(true); }; });
   }
   function markActive(){ side.querySelectorAll('.mss2-cat').forEach(function(el){ var v=el.getAttribute('data-v')||null; el.classList.toggle('mss2-active',v===state.filterVal); }); }
-  function grouped(){ return state.q && !state.filterVal; }
+  function grouped(){ return false; } /* завжди плаский список, відсортований за наявністю */
 
   function runSearch(reset){
     if(!state.q){ renderRecentOrEmpty(); countEl.textContent='Почни вводити запит'; return Promise.resolve(); }
@@ -231,6 +231,9 @@
     return searchSafe(body).then(function(d){
       state.total=d.estimatedTotalHits||0;
       state.hits=reset?d.hits:state.hits.concat(d.hits);
+      // гарантія порядку: в наявності зверху (стабільне сортування зберігає релевантність усередині груп),
+      // навіть якщо сортування Meili недоступне на індексі
+      state.hits.sort(function(a,b){ return (b.available?1:0)-(a.available?1:0); });
       countEl.textContent='Знайдено: '+state.total;
       if(reset&&state.hits.length) pushRecent(state.q);
       var html='';
@@ -240,7 +243,7 @@
         var prevAvail=null;
         state.hits.forEach(function(h){
           var a=!!h.available;
-          if(state.canSort && a!==prevAvail){
+          if(a!==prevAvail){
             html+='<div class="mss2-sep"><span class="mss2-dot '+(a?'ok':'off')+'"></span>'+(a?'В наявності':'Немає в наявності')+'</div>';
             prevAvail=a;
           }
