@@ -59,6 +59,14 @@ function hasManagerKey(req) {
   return !!mk && req.get('X-Import-Key') === mk;
 }
 
+// Роль ключа — щоб сторінка /admin показувала лише дозволені розділи.
+// 'full' — усе; 'manager' — лише додавання моделей (1 і 1б); 'none' — нічого.
+app.get('/api/keyinfo', (req, res) => {
+  if (hasFullKey(req)) return res.json({ role: 'full' });
+  if (hasManagerKey(req)) return res.json({ role: 'manager' });
+  res.json({ role: 'none' });
+});
+
 // === Один файл коду блоку (щоб у товарах був лише крихітний рядок) ===
 // Товар містить: <div class="lartek-compat-mount"></div><script src=".../widget.js" defer></script>
 // Майбутні зміни вигляду — правимо compat-widget.html, і оновлюється на всіх товарах без імпорту.
@@ -492,7 +500,8 @@ textarea{min-height:160px;resize:vertical;white-space:pre;overflow:auto}
 button{margin-top:16px;background:#1f883d;color:#fff;border:0;border-radius:8px;padding:11px 18px;font-size:15px;font-weight:700;cursor:pointer}
 button:disabled{opacity:.6;cursor:default}.hint{color:#6b7280;font-size:13px;margin-top:4px}
 .out{margin-top:14px;padding:11px;border-radius:8px;white-space:pre-wrap;font-size:14px;display:none}
-.ok{background:#eaf6ec;border:1px solid #bfe3c6;color:#1a7f37}.bad{background:#fdecea;border:1px solid #f3c1bb;color:#b42318}</style>
+.ok{background:#eaf6ec;border:1px solid #bfe3c6;color:#1a7f37}.bad{background:#fdecea;border:1px solid #f3c1bb;color:#b42318}
+.danger-card{border-left:4px solid #d1242f}</style>
 </head><body>
 <h1>Сумісні моделі — база</h1>
 <p class="hint">Ключ — значення <b>IMPORT_KEY</b> зі змінних сервісу в Railway. Він нікуди не зберігається.
@@ -501,7 +510,7 @@ button:disabled{opacity:.6;cursor:default}.hint{color:#6b7280;font-size:13px;mar
 <input id="key" type="password" autocomplete="off" placeholder="встав ключ">
 <div class="row"><input id="keyRemember" type="checkbox"><label style="margin:0;font-weight:400">Запам'ятати ключ у цьому браузері</label></div>
 
-<div class="card">
+<div class="card danger-card" id="cardExp" style="display:none">
   <h2>0) Наповнити з повного експорту (рекомендовано)</h2>
   <p class="hint">Бере списки з HTML-таблиць у описах: 2 і 3 колонки, «Марка», дужки, індустріальний код.
   Встав URL повного XML-експорту товарів (з описами). «Замінити все» — повна перезаливка бази.</p>
@@ -546,7 +555,7 @@ HQ8160"></textarea>
   <div class="out" id="xOut"></div>
 </div>
 
-<div class="card">
+<div class="card danger-card" id="cardFeed" style="display:none">
   <h2>2) Масове наповнення з фіду Horoshop</h2>
   <p class="hint">Бере списки з описів фіду. Артикул порожній = весь сайт (~хвилина).</p>
   <label>Артикул товару (необов'язково)</label>
@@ -574,6 +583,25 @@ function persistKey(){
 }
 remEl.addEventListener('change',persistKey);
 keyEl.addEventListener('input',persistKey);
+
+// ── роль ключа: масові розділи (0 і 2) показуємо лише під головним ключем ──
+var cardExp=document.getElementById('cardExp'),cardFeed=document.getElementById('cardFeed');
+var roleTimer=null;
+function applyRole(role){
+  var full=(role==='full');
+  cardExp.style.display=full?'':'none';
+  cardFeed.style.display=full?'':'none';
+}
+function checkRole(){
+  var k=key();
+  if(!k){applyRole('none');return;}
+  fetch('/api/keyinfo',{headers:{'X-Import-Key':k}})
+    .then(function(r){return r.json();})
+    .then(function(d){applyRole(d&&d.role);})
+    .catch(function(){applyRole('none');});
+}
+keyEl.addEventListener('input',function(){clearTimeout(roleTimer);roleTimer=setTimeout(checkRole,400);});
+checkRole();
 
 // ── 0) імпорт з повного експорту ──
 var expGo=document.getElementById('expGo'),expOut=document.getElementById('expOut');
