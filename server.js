@@ -362,6 +362,30 @@ function parseSheet(aoa, defBrand) {
   return out;
 }
 
+// Прочитати завантажений файл у масив рядків (aoa), розпізнаючи формат.
+// Справжній .xlsx (zip, «PK») чи старий .xls (OLE2, «D0 CF») читаємо як книгу.
+// Інакше це текст (TSV/CSV): визначаємо роздільник за рядком-заголовком
+// (пріоритет таб → «;» → «,») і читаємо з урахуванням лапок. Без цього SheetJS сам
+// угадує роздільник і на TSV, де в колонці «Код» багато ком, помилково ділить по комі
+// (тоді колонка «Модель» не знаходиться → no_models).
+function readAoa(buf) {
+  const isZip = buf[0] === 0x50 && buf[1] === 0x4B;   // PK…  → .xlsx
+  const isOle = buf[0] === 0xD0 && buf[1] === 0xCF;   // OLE2 → старий .xls
+  let wb;
+  if (isZip || isOle) {
+    wb = XLSX.read(buf, { type: 'buffer' });
+  } else {
+    const text = buf.toString('utf8').replace(/^﻿/, '');   // прибрати BOM
+    const head = text.split(/\r\n|\r|\n/).find(l => l.trim()) || '';
+    const tabs = (head.match(/\t/g) || []).length;
+    const semis = (head.match(/;/g) || []).length;
+    const FS = tabs ? '\t' : (semis ? ';' : ',');
+    wb = XLSX.read(text, { type: 'string', FS });
+  }
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
+}
+
 // === Завантаження моделей одного товару з Excel-файлу (кнопка «прикріпити файл») ===
 // POST /api/import-xlsx  headers: X-Import-Key
 // body: { sku, replace, defBrand, fileBase64 }  (перша сторінка книги; колонки Бренд/Модель/Код)
@@ -376,10 +400,7 @@ app.post('/api/import-xlsx', async (req, res) => {
 
   let aoa;
   try {
-    const buf = Buffer.from(b64, 'base64');
-    const wb = XLSX.read(buf, { type: 'buffer' });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    aoa = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
+    aoa = readAoa(Buffer.from(b64, 'base64'));
   } catch (e) { return res.status(400).json({ error: 'bad_file' }); }
 
   const models = parseSheet(aoa, defBrand);
@@ -620,16 +641,17 @@ WISL 105"></textarea>
 </div>
 
 <div class="card">
-  <h2>1б) Прикріпити Excel-файл з моделями</h2>
-  <p class="hint">Для нового товару: впиши артикул і прикріпи .xlsx. Колонки розпізнаються за
+  <h2>1б) Прикріпити файл з моделями</h2>
+  <p class="hint">Для нового товару: впиши артикул і прикріпи файл. Приймаються .xlsx, .xls, .csv
+  та текст із табуляцією / «;» / комою — формат розпізнається сам. Колонки — за
   заголовком (Бренд / Модель / Індустріальний код). Без заголовка: 1 колонка = моделі
   (бренд візьметься за замовчуванням), 2 = Бренд+Модель, 3 = Бренд+Модель+Код.</p>
   <label>Артикул товару</label>
   <input id="xSku" type="text" placeholder="напр. 237">
   <label>Бренд за замовчуванням (необов'язково)</label>
   <input id="xBrand" type="text" placeholder="напр. Philips — якщо у файлі лише коди">
-  <label>Файл Excel (.xlsx)</label>
-  <input id="xFile" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+  <label>Файл з моделями (.xlsx, .csv або текст)</label>
+  <input id="xFile" type="file" accept=".xlsx,.xls,.csv,.txt,.tsv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/plain">
   <div class="row"><input id="xReplace" type="checkbox" checked><label style="margin:0;font-weight:400">Замінити наявні моделі цього товару</label></div>
   <button id="xGo">Залити з файлу</button>
   <div class="out" id="xOut"></div>
@@ -771,7 +793,7 @@ xGo.onclick=function(){
   var f=document.getElementById('xFile').files[0];
   var replace=document.getElementById('xReplace').checked;
   if(!sku){alert('Впиши артикул');return;}
-  if(!f){alert('Прикріпи .xlsx файл');return;}
+  if(!f){alert('Прикріпи файл (.xlsx, .csv або текст)');return;}
   var reader=new FileReader();
   reader.onload=function(){
     var b64=String(reader.result).split(',').pop();
