@@ -107,8 +107,20 @@ app.get('/widget.js', (req, res) => {
       + 'var h=document.createElement(\'h2\');h.setAttribute(\'style\',\'font-size:20px;margin:0 0 12px;color:#111;font-family:Arial,sans-serif\');'
       + 'h.textContent=isRu?\'Совместимые модели\':\'Сумісні моделі\';'
       + 'var m=document.createElement(\'div\');m.className=\'lartek-compat-mount\';sec.appendChild(h);sec.appendChild(m);return sec;}'
-      + 'function insertBlock(sec){var T=[\'#tab-description\',\'.product-description\',\'.product-tabs\',\'.product__tabs\',\'.j-product__tabs\',\'[itemprop="description"]\',\'.product__content\'];'
-      + 'for(var i=0;i<T.length;i++){var el=document.querySelector(T[i]);if(el&&el.parentNode){el.parentNode.insertBefore(sec,el.nextSibling);return true;}}return false;}'
+      // Ставимо блок ПІСЛЯ всього блока вкладок (не всередині опису): спершу шукаємо
+      // контейнер вкладок/акордеона; якщо не знайшли — беремо елемент опису й піднімаємось
+      // до його секції-обгортки, і вставляємо після неї.
+      + 'function insertBlock(sec){'
+      + 'var W=[\'.product-tabs\',\'.product__tabs\',\'.j-product__tabs\',\'.accordion-tabs\',\'.product-heading\',\'.j-product-tabs\'];'
+      + 'for(var i=0;i<W.length;i++){var w=document.querySelector(W[i]);'
+      + 'if(w&&w.parentNode){var top=w;var p=w.parentNode;'
+      + 'while(p&&p!==document.body&&/^(DIV|SECTION)$/.test(p.tagName)&&p.className&&/tabs|accordion/i.test(p.className)){top=p;p=p.parentNode;}'
+      + 'top.parentNode.insertBefore(sec,top.nextSibling);return true;}}'
+      + 'var D=[\'#tab-description\',\'.product-description\',\'[itemprop="description"]\',\'.product__content\'];'
+      + 'for(var j=0;j<D.length;j++){var el=document.querySelector(D[j]);'
+      + 'if(el){var sect=el.closest(\'section, .product__section, [data-content-id]\')||el;'
+      + 'if(sect.parentNode){sect.parentNode.insertBefore(sec,sect.nextSibling);return true;}}}'
+      + 'return false;}'
       + 'function boot(){if(window.__lcBooted)return;'                       // захист від подвійного завантаження widget.js
       + 'var ms=document.querySelectorAll(\'.lartek-compat-mount\');'
       + 'if(ms.length){window.__lcBooted=1;for(var i=0;i<ms.length;i++){if(!ms[i].dataset.lcInit)run(ms[i]);}return;}'
