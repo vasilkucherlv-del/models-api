@@ -67,6 +67,19 @@ app.get('/api/keyinfo', (req, res) => {
   res.json({ role: 'none' });
 });
 
+// Список УСІХ артикулів, що мають моделі в базі (для звірки з експортом сайту).
+// Легкий: лише distinct sku. Приймає обидва ключі.
+app.get('/api/skus', async (req, res) => {
+  if (!hasManagerKey(req)) return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const { rows } = await pool.query('SELECT DISTINCT sku FROM compatibility ORDER BY sku');
+    res.json({ count: rows.length, skus: rows.map(r => r.sku) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
 // === Один файл коду блоку (щоб у товарах був лише крихітний рядок) ===
 // Товар містить: <div class="lartek-compat-mount"></div><script src=".../widget.js" defer></script>
 // Майбутні зміни вигляду — правимо compat-widget.html, і оновлюється на всіх товарах без імпорту.
@@ -622,6 +635,14 @@ WISL 105"></textarea>
   <div class="out" id="xOut"></div>
 </div>
 
+<div class="card">
+  <h2>Службове: артикули в базі</h2>
+  <p class="hint">Завантажити список УСІХ артикулів, що вже мають моделі в базі — для звірки
+  з експортом сайту (щоб знайти товари зовсім без даних про сумісність).</p>
+  <button id="skuGo">Завантажити артикули (.txt)</button>
+  <div class="out" id="skuOut"></div>
+</div>
+
 <div class="card danger-card" id="cardFeed" style="display:none">
   <h2>2) Масове наповнення з фіду Horoshop</h2>
   <p class="hint">Бере списки з описів фіду. Артикул порожній = весь сайт (~хвилина).</p>
@@ -767,6 +788,27 @@ xGo.onclick=function(){
   };
   reader.onerror=function(){show(xOut,'bad','Не вдалося прочитати файл');};
   reader.readAsDataURL(f);
+};
+
+// ── Службове: завантажити артикули з бази ──
+var skuGo=document.getElementById('skuGo'),skuOut=document.getElementById('skuOut');
+skuGo.onclick=function(){
+  if(!key()){alert('Введи ключ');return;}
+  skuGo.disabled=true; show(skuOut,'','Отримую список…');
+  fetch('/api/skus',{headers:{'X-Import-Key':key()}})
+    .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+    .then(function(x){
+      if(!x.ok||!x.d.skus){show(skuOut,'bad','Помилка: '+((x.d&&x.d.error)||'невідома')+(x.d&&x.d.error==='unauthorized'?' (невірний ключ)':''));return;}
+      var txt=x.d.skus.join('\\n');
+      var blob=new Blob([txt],{type:'text/plain;charset=utf-8'});
+      var a=document.createElement('a');
+      a.href=URL.createObjectURL(blob); a.download='artikuly_v_bazi.txt';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){URL.revokeObjectURL(a.href);},1000);
+      show(skuOut,'ok','Готово ✔ Артикулів у базі: '+x.d.count+'\\nФайл artikuly_v_bazi.txt завантажено.');
+    })
+    .catch(function(e){show(skuOut,'bad','Помилка з\\'єднання: '+e.message);})
+    .finally(function(){skuGo.disabled=false;});
 };
 
 // ── 2) імпорт з фіду ──
