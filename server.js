@@ -589,17 +589,18 @@ button:disabled{opacity:.6;cursor:default}.hint{color:#6b7280;font-size:13px;mar
 
 <div class="card">
   <h2>1) Ручне додавання моделей для товару</h2>
-  <p class="hint">Для нового товару: впиши артикул і встав список моделей — по одній на рядок.
-  Можна «Бренд Модель» в рядку, або лише код (тоді візьметься бренд за замовчуванням).</p>
+  <p class="hint">Для нового товару: впиши артикул і встав моделі у будь-якому форматі —
+  стовпчиком, через кому або «;». Розпізнається автоматично, дублікати прибираються.
+  Якщо всі моделі одного бренду — впиши його у «Бренд за замовчуванням». Пробіл лишається
+  частиною коду (напр. «WISL 105»). Без дефолтного бренду працює «Бренд Модель» в рядку.</p>
   <label>Артикул товару</label>
   <input id="mSku" type="text" placeholder="напр. 237">
   <label>Бренд за замовчуванням (необов'язково)</label>
   <input id="mBrand" type="text" placeholder="напр. Philips — якщо в рядках лише коди">
-  <label>Моделі (по одній на рядок)</label>
-  <textarea id="mText" placeholder="Philips HQ8142
-Philips S1070/04
-HQ8150
-HQ8160"></textarea>
+  <label>Моделі (стовпчиком, через кому або «;»)</label>
+  <textarea id="mText" placeholder="HQ8142, HQ8150, HQ8160
+S1070/04
+WISL 105"></textarea>
   <div class="row"><input id="mReplace" type="checkbox" checked><label style="margin:0;font-weight:400">Замінити наявні моделі цього товару</label></div>
   <button id="mGo">Зберегти моделі</button>
   <div class="out" id="mOut"></div>
@@ -689,19 +690,35 @@ expGo.onclick=function(){
 };
 
 // ── 1) ручне додавання ──
+// Гнучкий розбір: моделі можна вставляти стовпчиком, через кому або «;» — усе одно
+// кожна стане окремим рядком. Пробіл лишається частиною коду (напр. «WISL 105»),
+// тож роздільники між моделями — лише новий рядок / кома / «;».
 function parseModels(text, defBrand){
-  return text.split(/\\r?\\n/).map(function(line){
-    line=line.trim(); if(!line) return null;
-    var parts=line.split(/\\t|;|,|\\s{2,}/).map(function(s){return s.trim();}).filter(Boolean);
+  defBrand=(defBrand||'').trim();
+  var entries=String(text||'').split(/[\\r\\n,;]+/)
+    .map(function(s){return s.replace(/\\s+/g,' ').trim();})
+    .filter(Boolean);
+  var out=[], seen={};
+  entries.forEach(function(entry){
+    entry=entry.replace(/^\\s*(?:\\d+[.)]\\s*|[-–—•*]\\s*)/,'').trim();   // прибрати «1.», «- », «• »
+    if(!entry) return;
     var brand, model;
-    if(parts.length>=2){ brand=parts[0]; model=parts.slice(1).join(' '); }
-    else {
-      var m=line.match(/^(\\S+)\\s+(\\S.*)$/);
-      if(m && /^[A-Za-zА-Яа-яЇІЄҐїієґ&.\\-]+$/.test(m[1])){ brand=m[1]; model=m[2]; }
-      else { brand=defBrand; model=line; }
+    if(defBrand){
+      brand=defBrand; model=entry;                       // бренд заданий → весь запис = модель
+    } else {
+      var parts=entry.split(/\\t|\\s{2,}/).map(function(s){return s.trim();}).filter(Boolean);
+      if(parts.length>=2){ brand=parts[0]; model=parts.slice(1).join(' '); }
+      else {
+        var m=entry.match(/^([A-Za-zА-Яа-яЇІЄҐїієґ&.\\-]{2,})\\s+(.*\\d.*)$/);
+        if(m){ brand=m[1]; model=m[2]; } else { brand=''; model=entry; }
+      }
     }
-    return {brand:(brand||defBrand||''), model:model};
-  }).filter(Boolean);
+    model=model.trim(); if(!model) return;
+    var kkey=(brand+'|'+model).toLowerCase();
+    if(seen[kkey]) return; seen[kkey]=1;                  // прибрати дублікати
+    out.push({brand:brand||'', model:model});
+  });
+  return out;
 }
 var mGo=document.getElementById('mGo'),mOut=document.getElementById('mOut');
 mGo.onclick=function(){
