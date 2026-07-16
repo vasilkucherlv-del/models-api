@@ -152,6 +152,8 @@
     var setText=function(el,t){ if(el) el.textContent=t; };
     var setHtml=function(el,h){ if(el) el.innerHTML=h; };
     function norm(s){ return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,''); }
+    // У полі «код» може бути кілька кодів через кому/«;» — точний збіг за будь-яким із них.
+    function codeHit(code,qn){ return !!code && String(code).split(/[,;]/).some(function(c){ return norm(c)===qn; }); }
     function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
     function api(path){ return fetch(API+path,{headers:{'Accept':'application/json'}}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }); }
     function plural(n,f){ var a=n%10,b=n%100; return (a===1&&b!==11)?f[0]:(a>=2&&a<=4&&(b<10||b>=20))?f[1]:f[2]; }
@@ -200,7 +202,7 @@
           if(d.tooMany){ setHtml(elQresult,'<div class="lcw-banner info">'+T.tooMany+'</div>'); return; }
           var items=d.items||[];
           if(!items.length){ setHtml(elQresult,'<div class="lcw-banner bad">'+T.notFound(esc(raw.trim()))+'</div>'); return; }
-          var exact=items.filter(function(it){ return norm(it.model)===qn; });
+          var exact=items.filter(function(it){ return norm(it.model)===qn || codeHit(it.code,qn); });
           if(exact.length){ setHtml(elQresult,'<div class="lcw-banner ok">'+T.fits+'</div><ul class="lcw-list">'+listHtml(exact,qn,true)+'</ul>'); }
           else { setHtml(elQresult,'<div class="lcw-banner warn">'+T.incTitle+'</div><div class="lcw-hint">'+T.incHint+'</div>'); }
         }).catch(function(){ setHtml(elQresult,'<div class="lcw-hint">'+T.checkFail+'</div>'); });
