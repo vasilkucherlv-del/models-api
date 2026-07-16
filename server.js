@@ -99,11 +99,25 @@ app.get('/widget.js', (req, res) => {
       + 'return null;}'
       // boot: якщо в описі є mount — монтуємо його (наявні товари); якщо ні — глобально
       // знаходимо вкладку «Сумісні моделі», створюємо mount і запускаємо (нові товари).
+      + 'function metaSku(){var m=document.querySelector(\'meta[itemprop="sku"]\');return m?String(m.getAttribute(\'content\')||\'\').trim():\'\';}'
+      // Власний блок «Сумісні моделі» — коли рідної вкладки нема (нові товари).
+      + 'function makeBlock(){var isRu=/^\\/ru(\\/|$)/.test(location.pathname);'
+      + 'var sec=document.createElement(\'section\');sec.className=\'lartek-compat-block\';'
+      + 'sec.setAttribute(\'style\',\'margin:22px 0;padding:16px 0;border-top:1px solid #e6e9ee\');'
+      + 'var h=document.createElement(\'h2\');h.setAttribute(\'style\',\'font-size:20px;margin:0 0 12px;color:#111;font-family:Arial,sans-serif\');'
+      + 'h.textContent=isRu?\'Совместимые модели\':\'Сумісні моделі\';'
+      + 'var m=document.createElement(\'div\');m.className=\'lartek-compat-mount\';sec.appendChild(h);sec.appendChild(m);return sec;}'
+      + 'function insertBlock(sec){var T=[\'#tab-description\',\'.product-description\',\'.product-tabs\',\'.product__tabs\',\'.j-product__tabs\',\'[itemprop="description"]\',\'.product__content\'];'
+      + 'for(var i=0;i<T.length;i++){var el=document.querySelector(T[i]);if(el&&el.parentNode){el.parentNode.insertBefore(sec,el.nextSibling);return true;}}return false;}'
       + 'function boot(){if(window.__lcBooted)return;'                       // захист від подвійного завантаження widget.js
       + 'var ms=document.querySelectorAll(\'.lartek-compat-mount\');'
       + 'if(ms.length){window.__lcBooted=1;for(var i=0;i<ms.length;i++){if(!ms[i].dataset.lcInit)run(ms[i]);}return;}'
       + 'var panel=findPanel();if(panel&&!panel.getAttribute(\'data-lc-done\')){window.__lcBooted=1;panel.setAttribute(\'data-lc-done\',\'1\');'
-      + 'var m=document.createElement(\'div\');m.className=\'lartek-compat-mount\';panel.innerHTML=\'\';panel.appendChild(m);run(m);}}'
+      + 'var m=document.createElement(\'div\');m.className=\'lartek-compat-mount\';panel.innerHTML=\'\';panel.appendChild(m);run(m);return;}'
+      // немає вкладки — власний блок, але лише якщо в базі реально є моделі для цього артикулу
+      + 'var sku=metaSku();if(!sku)return;'
+      + 'fetch(API_DEFAULT+\'/api/brands?sku=\'+encodeURIComponent(sku)).then(function(r){return r.json();}).then(function(d){'
+      + 'if(window.__lcBooted||!d||!d.total)return;var sec=makeBlock();if(insertBlock(sec)){window.__lcBooted=1;run(sec.querySelector(\'.lartek-compat-mount\'));}}).catch(function(){});}'
       + 'if(document.readyState===\'loading\')document.addEventListener(\'DOMContentLoaded\',boot);else boot();})();';
     res.set('Content-Type', 'application/javascript; charset=utf-8');
     res.set('Cache-Control', 'public, max-age=300');
