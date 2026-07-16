@@ -88,7 +88,22 @@ app.get('/widget.js', (req, res) => {
     const origin = (req.get('x-forwarded-proto') || req.protocol) + '://' + req.get('host');
     const js = '(function(){var API_DEFAULT=' + JSON.stringify(origin) + ';'
       + 'function run(root){root.dataset.lcInit=\'1\';' + widgetBody() + '}'
-      + 'function boot(){var ms=document.querySelectorAll(\'.lartek-compat-mount\');for(var i=0;i<ms.length;i++){if(!ms[i].dataset.lcInit)run(ms[i]);}}'
+      + 'function norm2(s){return String(s||\'\').toLowerCase().replace(/\\s+/g,\' \').trim();}'
+      + 'var TT=[\'сумісні моделі\',\'совместимые модели\',\'совместимость с моделями\',\'сумісність з моделями\'];'
+      + 'function findPanel(){var tabs=document.querySelectorAll(\'.product-heading__tab, [class*="heading__tab"]\');'
+      + 'for(var i=0;i<tabs.length;i++){var tt=norm2(tabs[i].textContent);'
+      + 'if(TT.indexOf(tt)>=0){var id=(tabs[i].getAttribute(\'href\')||\'\').replace(/^#/,\'\');'
+      + 'if(id){var b=document.querySelector(\'[data-content-id="\'+id+\'"]\')||document.getElementById(id);if(b)return b;}}}'
+      + 'var bl=document.querySelectorAll(\'[data-content-id], .j-product-block__tab, .product__section\');'
+      + 'for(var j=0;j<bl.length;j++){var tx=norm2(bl[j].textContent).slice(0,80);if(/сум[іи]сн|совмест/.test(tx)&&/модел/.test(tx))return bl[j];}'
+      + 'return null;}'
+      // boot: якщо в описі є mount — монтуємо його (наявні товари); якщо ні — глобально
+      // знаходимо вкладку «Сумісні моделі», створюємо mount і запускаємо (нові товари).
+      + 'function boot(){if(window.__lcBooted)return;'                       // захист від подвійного завантаження widget.js
+      + 'var ms=document.querySelectorAll(\'.lartek-compat-mount\');'
+      + 'if(ms.length){window.__lcBooted=1;for(var i=0;i<ms.length;i++){if(!ms[i].dataset.lcInit)run(ms[i]);}return;}'
+      + 'var panel=findPanel();if(panel&&!panel.getAttribute(\'data-lc-done\')){window.__lcBooted=1;panel.setAttribute(\'data-lc-done\',\'1\');'
+      + 'var m=document.createElement(\'div\');m.className=\'lartek-compat-mount\';panel.innerHTML=\'\';panel.appendChild(m);run(m);}}'
       + 'if(document.readyState===\'loading\')document.addEventListener(\'DOMContentLoaded\',boot);else boot();})();';
     res.set('Content-Type', 'application/javascript; charset=utf-8');
     res.set('Cache-Control', 'public, max-age=300');
