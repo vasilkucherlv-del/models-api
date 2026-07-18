@@ -23,3 +23,15 @@ CREATE INDEX IF NOT EXISTS idx_comp_sku
 -- GIN-індекс по триграмах: дає швидкий пошук LIKE '%...%'
 CREATE INDEX IF NOT EXISTS idx_comp_model_trgm
   ON compatibility USING gin (model_norm gin_trgm_ops);
+
+-- Лог пошукових запитів сайту (аналітика: топ запитів і запити без результатів).
+CREATE TABLE IF NOT EXISTS search_log (
+  id         BIGSERIAL PRIMARY KEY,
+  q          TEXT NOT NULL,               -- як ввів користувач
+  q_norm     TEXT NOT NULL,               -- нижній регістр, згорнуті пробіли (для групування)
+  hits       INTEGER NOT NULL DEFAULT 0,  -- скільки знайшлось
+  source     TEXT NOT NULL DEFAULT 'site',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_slog_created ON search_log (created_at);
+CREATE INDEX IF NOT EXISTS idx_slog_qnorm   ON search_log (q_norm);

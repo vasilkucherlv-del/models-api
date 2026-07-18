@@ -80,6 +80,46 @@ app.get('/api/skus', async (req, res) => {
   }
 });
 
+// === Аналітика пошуку ===
+// POST /api/search-log { q, hits, source }  — публічний прийом логів із сайту.
+// Захищений лише перевіркою довжини; ніколи не ламає сайт (завжди 204).
+app.post('/api/search-log', async (req, res) => {
+  try {
+    const q = String((req.body && req.body.q) || '').trim().replace(/\s+/g, ' ').slice(0, 120);
+    if (q.length < 2) return res.status(204).end();
+    const hits = Math.max(0, parseInt((req.body && req.body.hits) || 0, 10) || 0);
+    const source = String((req.body && req.body.source) || 'site').slice(0, 20);
+    await pool.query(
+      'INSERT INTO search_log (q, q_norm, hits, source) VALUES ($1,$2,$3,$4)',
+      [q, q.toLowerCase(), hits, source]
+    );
+  } catch (e) { /* тихо: лог не має впливати на сайт */ }
+  res.status(204).end();
+});
+
+// GET /api/search-stats?days=30&limit=50  — звіт (топ запитів + запити без результатів).
+app.get('/api/search-stats', async (req, res) => {
+  if (!hasManagerKey(req)) return res.status(401).json({ error: 'unauthorized' });
+  const days = Math.min(Math.max(parseInt(req.query.days || '30', 10) || 30, 1), 365);
+  const lim = Math.min(Math.max(parseInt(req.query.limit || '50', 10) || 50, 1), 200);
+  try {
+    const since = `now() - interval '${days} days'`;
+    const total = await pool.query(`SELECT count(*)::int AS n FROM search_log WHERE created_at >= ${since}`);
+    const top = await pool.query(
+      `SELECT q_norm AS q, count(*)::int AS cnt, max(hits)::int AS max_hits
+         FROM search_log WHERE created_at >= ${since}
+        GROUP BY q_norm ORDER BY cnt DESC, q_norm LIMIT $1`, [lim]);
+    const zero = await pool.query(
+      `SELECT q_norm AS q, count(*)::int AS cnt
+         FROM search_log WHERE created_at >= ${since} AND hits = 0
+        GROUP BY q_norm ORDER BY cnt DESC, q_norm LIMIT $1`, [lim]);
+    res.json({ days, total: total.rows[0].n, top: top.rows, zero: zero.rows });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
 // === Один файл коду блоку (щоб у товарах був лише крихітний рядок) ===
 // Товар містить: <div class="lartek-compat-mount"></div><script src=".../widget.js" defer></script>
 // Майбутні зміни вигляду — правимо compat-widget.html, і оновлюється на всіх товарах без імпорту.
@@ -172,7 +212,9 @@ app.get('/mss2.js', (req, res) => {
     res.set('Content-Type', 'application/javascript; charset=utf-8');
     res.set('Cache-Control', 'public, max-age=300');
     res.set('Access-Control-Allow-Origin', '*');
-    res.send(mss2Body());
+    // Підставляємо адресу логування пошуку (цей самий сервер) — вмикає аналітику.
+    const origin = (req.get('x-forwarded-proto') || req.protocol) + '://' + req.get('host');
+    res.send(mss2Body().replace("var LOG_URL=''", 'var LOG_URL=' + JSON.stringify(origin + '/api/search-log')));
   } catch (e) {
     console.error(e);
     res.status(500).send('// mss2 error');
@@ -613,7 +655,15 @@ button{margin-top:16px;background:#1f883d;color:#fff;border:0;border-radius:8px;
 button:disabled{opacity:.6;cursor:default}.hint{color:#6b7280;font-size:13px;margin-top:4px}
 .out{margin-top:14px;padding:11px;border-radius:8px;white-space:pre-wrap;font-size:14px;display:none}
 .ok{background:#eaf6ec;border:1px solid #bfe3c6;color:#1a7f37}.bad{background:#fdecea;border:1px solid #f3c1bb;color:#b42318}
-.danger-card{border-left:4px solid #d1242f}</style>
+.danger-card{border-left:4px solid #d1242f}
+select{margin-top:4px;padding:10px 12px;font-size:15px;border:1px solid #d0d7de;border-radius:8px;font-family:inherit}
+.saout{margin-top:14px;font-size:14px}
+.sacols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
+@media(max-width:640px){.sacols{grid-template-columns:1fr}}
+.satab{width:100%;border-collapse:collapse;margin-top:6px;font-size:13px}
+.satab th,.satab td{border-bottom:1px solid #eef1f4;padding:5px 6px;text-align:left;vertical-align:top}
+.satab th{color:#8a929d;font-weight:700}
+.satab td:nth-child(2),.satab th:nth-child(2){text-align:right;white-space:nowrap}</style>
 </head><body>
 <h1>Сумісні моделі — база</h1>
 <p class="hint">Ключ — значення <b>IMPORT_KEY</b> зі змінних сервісу в Railway. Він нікуди не зберігається.
@@ -677,6 +727,16 @@ WISL 105"></textarea>
   <div class="out" id="skuOut"></div>
 </div>
 
+<div class="card">
+  <h2>Аналітика пошуку</h2>
+  <p class="hint">Що люди шукають на сайті. «Без результатів» — прямий сигнал попиту:
+  шукали, а не знайшли (нема товару або названо інакше).</p>
+  <label>Період</label>
+  <select id="saDays"><option value="7">7 днів</option><option value="30" selected>30 днів</option><option value="90">90 днів</option></select>
+  <button id="saGo">Показати</button>
+  <div id="saOut"></div>
+</div>
+
 <div class="card danger-card" id="cardFeed" style="display:none">
   <h2>2) Масове наповнення з фіду Horoshop</h2>
   <p class="hint">Бере списки з описів фіду. Артикул порожній = весь сайт (~хвилина).</p>
@@ -690,6 +750,7 @@ WISL 105"></textarea>
 <script>
 function key(){return document.getElementById('key').value.trim();}
 function show(el,cls,txt){el.style.display='block';el.className='out '+cls;el.textContent=txt;}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return '&#'+c.charCodeAt(0)+';';});}
 
 // ── запам'ятовування ключа у цьому браузері (localStorage, лише за галочкою) ──
 var keyEl=document.getElementById('key'),remEl=document.getElementById('keyRemember');
@@ -843,6 +904,31 @@ skuGo.onclick=function(){
     })
     .catch(function(e){show(skuOut,'bad','Помилка з\\'єднання: '+e.message);})
     .finally(function(){skuGo.disabled=false;});
+};
+
+// ── Аналітика пошуку ──
+var saGo=document.getElementById('saGo'),saOut=document.getElementById('saOut');
+saGo.onclick=function(){
+  if(!key()){alert('Введи ключ');return;}
+  var days=document.getElementById('saDays').value;
+  saGo.disabled=true; saOut.className=''; saOut.style.display='block'; saOut.textContent='Рахую…';
+  fetch('/api/search-stats?days='+days+'&limit=50',{headers:{'X-Import-Key':key()}})
+    .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+    .then(function(x){
+      if(!x.ok){saOut.className='out bad';saOut.textContent='Помилка: '+((x.d&&x.d.error)||'невідома')+(x.d&&x.d.error==='unauthorized'?' (невірний ключ)':'');return;}
+      var d=x.d;
+      function tbl(title,rows,zero){
+        if(!rows||!rows.length) return '<b>'+title+'</b><div class="hint">— порожньо —</div>';
+        var h='<b>'+title+'</b><table class="satab"><tr><th>Запит</th><th>Разів</th>'+(zero?'':'<th>Макс. знайдено</th>')+'</tr>';
+        rows.forEach(function(r){ h+='<tr><td>'+esc(r.q)+'</td><td>'+r.cnt+'</td>'+(zero?'':'<td>'+r.max_hits+'</td>')+'</tr>'; });
+        return h+'</table>';
+      }
+      saOut.className='saout'; saOut.style.display='block';
+      saOut.innerHTML='<div class="hint">Усього пошуків за '+d.days+' дн.: '+d.total+'</div>'
+        +'<div class="sacols">'+tbl('🔝 Топ запитів',d.top,false)+tbl('❌ Без результатів',d.zero,true)+'</div>';
+    })
+    .catch(function(e){saOut.className='out bad';saOut.textContent='Помилка з\\'єднання: '+e.message;})
+    .finally(function(){saGo.disabled=false;});
 };
 
 // ── 2) імпорт з фіду ──
