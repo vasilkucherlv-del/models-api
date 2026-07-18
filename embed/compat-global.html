@@ -80,6 +80,7 @@
       notFound:function(x){return '✕ Модели «'+x+'» нет в списке совместимых';},
       fits:'✓ Подходит к вашему прибору', incTitle:'⚠ Уточните полный код модели',
       incHint:'Введён неполный код. Цифры после «/» важны — именно они определяют совместимость. Проверьте точный код на шильдике прибора.',
+      foundHint:'Похожие модели — найдите свою точную в списке:',
       help:'Здесь отображены совместимые модели для этой запчасти. Выберите бренд техники, затем введите модель прибора. Если позиция совместима с вашим прибором — ваша модель обязательно отобразится в списке. Если вашей модели нет — <b>свяжитесь с нами</b>.',
       listUpdating:'Список уточняется.', loadFail:'Не удалось загрузить. Воспользуйтесь поиском справа.',
       loading:'Загрузка…', loadErr:'Ошибка загрузки.', checkFail:'Не удалось проверить. Попробуйте ещё.'
@@ -94,6 +95,7 @@
       notFound:function(x){return '✕ Моделі «'+x+'» немає у списку сумісних';},
       fits:'✓ Підходить до вашого приладу', incTitle:'⚠ Уточніть повний код моделі',
       incHint:'Введено неповний код. Цифри після «/» важливі — саме вони визначають сумісність. Перевірте точний код на шильдику приладу.',
+      foundHint:'Схожі моделі — знайдіть свою точну у списку:',
       help:'Тут відображено сумісні моделі для цієї запчастини. Оберіть бренд техніки, потім введіть модель приладу. Якщо позиція сумісна з вашим приладом — ваша модель обов’язково відобразиться у списку. Якщо вашої моделі немає — <b>зв’яжіться з нами</b>.',
       listUpdating:'Список уточнюється.', loadFail:'Не вдалося завантажити. Скористайтесь пошуком праворуч.',
       loading:'Завантаження…', loadErr:'Помилка завантаження.', checkFail:'Не вдалося перевірити. Спробуйте ще.'
@@ -204,7 +206,7 @@
           if(!items.length){ setHtml(elQresult,'<div class="lcw-banner bad">'+T.notFound(esc(raw.trim()))+'</div>'); return; }
           var exact=items.filter(function(it){ return norm(it.model)===qn || codeHit(it.code,qn); });
           if(exact.length){ setHtml(elQresult,'<div class="lcw-banner ok">'+T.fits+'</div><ul class="lcw-list">'+listHtml(exact,qn,true)+'</ul>'); }
-          else { setHtml(elQresult,'<div class="lcw-banner warn">'+T.incTitle+'</div><div class="lcw-hint">'+T.incHint+'</div>'); }
+          else { setHtml(elQresult,'<div class="lcw-hint">'+T.foundHint+'</div><ul class="lcw-list">'+listHtml(items,qn,true)+'</ul>'); }
         }).catch(function(){ setHtml(elQresult,'<div class="lcw-hint">'+T.checkFail+'</div>'); });
       },180);
     }
