@@ -35,3 +35,9 @@ CREATE TABLE IF NOT EXISTS search_log (
 );
 CREATE INDEX IF NOT EXISTS idx_slog_created ON search_log (created_at);
 CREATE INDEX IF NOT EXISTS idx_slog_qnorm   ON search_log (q_norm);
+
+-- Опрацьовані запити «без результатів» (натиснув «опрацьовано» — більше не показувати).
+CREATE TABLE IF NOT EXISTS search_dismissed (
+  q_norm     TEXT PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

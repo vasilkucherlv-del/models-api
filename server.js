@@ -97,23 +97,56 @@ app.post('/api/search-log', async (req, res) => {
   res.status(204).end();
 });
 
-// GET /api/search-stats?days=30&limit=50  — звіт (топ запитів + запити без результатів).
+// GET /api/search-stats?days=30&limit=50&min=2  — очищений звіт.
+// Список «без результатів» фільтрується: довжина ≥ 3, повторів ≥ min (відсіює
+// разові одруківки) і без «опрацьованих». Так не доводиться гортати сміття.
 app.get('/api/search-stats', async (req, res) => {
   if (!hasManagerKey(req)) return res.status(401).json({ error: 'unauthorized' });
   const days = Math.min(Math.max(parseInt(req.query.days || '30', 10) || 30, 1), 365);
   const lim = Math.min(Math.max(parseInt(req.query.limit || '50', 10) || 50, 1), 200);
+  const min = Math.min(Math.max(parseInt(req.query.min || '2', 10) || 2, 1), 50);
   try {
     const since = `now() - interval '${days} days'`;
     const total = await pool.query(`SELECT count(*)::int AS n FROM search_log WHERE created_at >= ${since}`);
     const top = await pool.query(
       `SELECT q_norm AS q, count(*)::int AS cnt, max(hits)::int AS max_hits
-         FROM search_log WHERE created_at >= ${since}
+         FROM search_log WHERE created_at >= ${since} AND char_length(q_norm) >= 2
         GROUP BY q_norm ORDER BY cnt DESC, q_norm LIMIT $1`, [lim]);
     const zero = await pool.query(
       `SELECT q_norm AS q, count(*)::int AS cnt
-         FROM search_log WHERE created_at >= ${since} AND hits = 0
-        GROUP BY q_norm ORDER BY cnt DESC, q_norm LIMIT $1`, [lim]);
-    res.json({ days, total: total.rows[0].n, top: top.rows, zero: zero.rows });
+         FROM search_log
+        WHERE created_at >= ${since} AND hits = 0 AND char_length(q_norm) >= 3
+          AND q_norm NOT IN (SELECT q_norm FROM search_dismissed)
+        GROUP BY q_norm HAVING count(*) >= $1
+        ORDER BY cnt DESC, q_norm LIMIT $2`, [min, lim]);
+    // скільки нулів приховано фільтром (разові/короткі/опрацьовані) — для контексту
+    const hidden = await pool.query(
+      `SELECT count(*)::int AS n FROM (
+         SELECT q_norm FROM search_log
+          WHERE created_at >= ${since} AND hits = 0
+          GROUP BY q_norm
+       ) t
+       WHERE t.q_norm NOT IN (
+         SELECT q_norm FROM search_log
+          WHERE created_at >= ${since} AND hits = 0 AND char_length(q_norm) >= 3
+            AND q_norm NOT IN (SELECT q_norm FROM search_dismissed)
+          GROUP BY q_norm HAVING count(*) >= ${min}
+       )`);
+    res.json({ days, min, total: total.rows[0].n, top: top.rows, zero: zero.rows, hiddenZero: hidden.rows[0].n });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// POST /api/search-dismiss { q }  — позначити запит «опрацьовано» (сховати зі звіту).
+app.post('/api/search-dismiss', async (req, res) => {
+  if (!hasManagerKey(req)) return res.status(401).json({ error: 'unauthorized' });
+  const q = String((req.body && req.body.q) || '').trim().toLowerCase().slice(0, 120);
+  if (!q) return res.status(400).json({ error: 'q_required' });
+  try {
+    await pool.query('INSERT INTO search_dismissed (q_norm) VALUES ($1) ON CONFLICT DO NOTHING', [q]);
+    res.json({ ok: true });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'server_error' });
@@ -731,8 +764,13 @@ WISL 105"></textarea>
   <h2>Аналітика пошуку</h2>
   <p class="hint">Що люди шукають на сайті. «Без результатів» — прямий сигнал попиту:
   шукали, а не знайшли (нема товару або названо інакше).</p>
-  <label>Період</label>
-  <select id="saDays"><option value="7">7 днів</option><option value="30" selected>30 днів</option><option value="90">90 днів</option></select>
+  <div class="row" style="gap:16px;flex-wrap:wrap;margin-top:0">
+    <span><label>Період</label>
+    <select id="saDays"><option value="7">7 днів</option><option value="30" selected>30 днів</option><option value="90">90 днів</option></select></span>
+    <span><label>Мінімум повторів</label>
+    <select id="saMin"><option value="1">1 (усе)</option><option value="2" selected>2</option><option value="3">3</option><option value="5">5</option></select></span>
+  </div>
+  <p class="hint">«Мінімум повторів» відсіює разові одруківки: 2+ = показувати лише те, що шукали кілька разів (реальний попит).</p>
   <button id="saGo">Показати</button>
   <div id="saOut"></div>
 </div>
@@ -908,28 +946,40 @@ skuGo.onclick=function(){
 
 // ── Аналітика пошуку ──
 var saGo=document.getElementById('saGo'),saOut=document.getElementById('saOut');
-saGo.onclick=function(){
+function saLoad(){
   if(!key()){alert('Введи ключ');return;}
-  var days=document.getElementById('saDays').value;
+  var days=document.getElementById('saDays').value, min=document.getElementById('saMin').value;
   saGo.disabled=true; saOut.className=''; saOut.style.display='block'; saOut.textContent='Рахую…';
-  fetch('/api/search-stats?days='+days+'&limit=50',{headers:{'X-Import-Key':key()}})
+  fetch('/api/search-stats?days='+days+'&min='+min+'&limit=50',{headers:{'X-Import-Key':key()}})
     .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
     .then(function(x){
       if(!x.ok){saOut.className='out bad';saOut.textContent='Помилка: '+((x.d&&x.d.error)||'невідома')+(x.d&&x.d.error==='unauthorized'?' (невірний ключ)':'');return;}
       var d=x.d;
-      function tbl(title,rows,zero){
-        if(!rows||!rows.length) return '<b>'+title+'</b><div class="hint">— порожньо —</div>';
-        var h='<b>'+title+'</b><table class="satab"><tr><th>Запит</th><th>Разів</th>'+(zero?'':'<th>Макс. знайдено</th>')+'</tr>';
-        rows.forEach(function(r){ h+='<tr><td>'+esc(r.q)+'</td><td>'+r.cnt+'</td>'+(zero?'':'<td>'+r.max_hits+'</td>')+'</tr>'; });
+      function topTbl(rows){
+        if(!rows||!rows.length) return '<b>🔝 Топ запитів</b><div class="hint">— порожньо —</div>';
+        var h='<b>🔝 Топ запитів</b><table class="satab"><tr><th>Запит</th><th>Разів</th><th>Макс. знайдено</th></tr>';
+        rows.forEach(function(r){ h+='<tr><td>'+esc(r.q)+'</td><td>'+r.cnt+'</td><td>'+r.max_hits+'</td></tr>'; });
+        return h+'</table>';
+      }
+      function zeroTbl(rows){
+        if(!rows||!rows.length) return '<b>❌ Без результатів</b><div class="hint">— порожньо (усе опрацьовано або відсіяно) —</div>';
+        var h='<b>❌ Без результатів</b><table class="satab"><tr><th>Запит</th><th>Разів</th><th></th></tr>';
+        rows.forEach(function(r){ h+='<tr><td>'+esc(r.q)+'</td><td>'+r.cnt+'</td><td><button class="sadis" data-q="'+esc(r.q)+'" style="margin:0;padding:3px 8px;font-size:12px;background:#6b7280">опрацьовано</button></td></tr>'; });
         return h+'</table>';
       }
       saOut.className='saout'; saOut.style.display='block';
-      saOut.innerHTML='<div class="hint">Усього пошуків за '+d.days+' дн.: '+d.total+'</div>'
-        +'<div class="sacols">'+tbl('🔝 Топ запитів',d.top,false)+tbl('❌ Без результатів',d.zero,true)+'</div>';
+      saOut.innerHTML='<div class="hint">Усього пошуків за '+d.days+' дн.: '+d.total+' · приховано разових/опрацьованих нулів: '+(d.hiddenZero||0)+'</div>'
+        +'<div class="sacols">'+topTbl(d.top)+zeroTbl(d.zero)+'</div>';
+      saOut.querySelectorAll('.sadis').forEach(function(b){ b.onclick=function(){
+        b.disabled=true;
+        fetch('/api/search-dismiss',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},body:JSON.stringify({q:b.getAttribute('data-q')})})
+          .then(function(){ saLoad(); });
+      };});
     })
     .catch(function(e){saOut.className='out bad';saOut.textContent='Помилка з\\'єднання: '+e.message;})
     .finally(function(){saGo.disabled=false;});
-};
+}
+saGo.onclick=saLoad;
 
 // ── 2) імпорт з фіду ──
 var go=document.getElementById('go'),out=document.getElementById('out');
