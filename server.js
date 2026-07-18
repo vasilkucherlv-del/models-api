@@ -428,17 +428,29 @@ app.post('/api/import-xlsx', async (req, res) => {
   }
 });
 
-// Пакетний upsert (швидко заливає багато рядків). Дедуп у межах пакета за (sku, model_norm),
-// щоб ON CONFLICT не спіткнувся на дублі в одному запиті.
+// Пакетний upsert (швидко заливає багато рядків). Дедуп за (sku, model_norm),
+// щоб ON CONFLICT не спіткнувся на дублі в одному запиті. ВАЖЛИВО: коди різних
+// рядків однієї моделі ОБ'ЄДНУЄМО (одна модель може мати багато індустріальних
+// номерів — файл дає їх окремими рядками; не втрачаємо жоден). Коди можуть уже
+// бути списком через кому/«;» — розкладаємо й збираємо унікальні.
 async function upsertRows(client, rows) {
-  const seen = new Set();
-  const uniq = [];
+  const byKey = new Map();
   for (const r of rows) {
     const key = r.sku + '|' + r.model_norm;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    uniq.push(r);
+    let e = byKey.get(key);
+    if (!e) {
+      e = { sku: r.sku, brand: r.brand, model: r.model, model_norm: r.model_norm, codes: [], seen: new Set() };
+      byKey.set(key, e);
+    }
+    String(r.code || '').split(/[,;]/).forEach(function (c) {
+      c = c.trim();
+      const cn = norm(c);
+      if (cn && !e.seen.has(cn)) { e.seen.add(cn); e.codes.push(c); }
+    });
   }
+  const uniq = Array.from(byKey.values()).map(function (e) {
+    return { sku: e.sku, brand: e.brand, model: e.model, model_norm: e.model_norm, code: e.codes.join(', ') };
+  });
   const BATCH = 500;
   let n = 0;
   for (let i = 0; i < uniq.length; i += BATCH) {
