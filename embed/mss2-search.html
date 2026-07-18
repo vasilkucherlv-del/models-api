@@ -123,7 +123,16 @@
   }
   // Розміри шукаємо ТОЧНО (без одруківок): канонічний токен обгортаємо в лапки —
   // Meili робить фразовий пошук, тож 13.5*5 (5x13p5) не збігатиметься з 12.5 (5x12p5).
-  function qNorm(){ return normDims(state.q).replace(/\d+(?:p\d+)?(?:x\d+(?:p\d+)?)+/g,'"$&"'); }
+  // Запит без кирилиці — це модель або індустріальний код: шукаємо його ФРАЗОЮ
+  // (слова поряд), щоб «AR 103» не збігалось випадково зі шматками різних записів
+  // (напр. суфікс країни *AR + код …-103.0). Назви (кирилиця) — як раніше, по словах.
+  function qNorm(){
+    var s = normDims(state.q).trim();
+    if (s && !/[а-яёіїєґА-ЯЁІЇЄҐ]/.test(s)) {
+      return '"' + s.replace(/"/g, ' ').replace(/\s+/g, ' ').trim() + '"';
+    }
+    return s.replace(/\d+(?:p\d+)?(?:x\d+(?:p\d+)?)+/g, '"$&"');
+  }
   function catIco(name){
     var u=CATIMG[name]; if(!u) return '<span class="mss2-ico">🔧</span>';
     var full=(u.slice(0,4)==='http')?u:CIMG_BASE+u;
