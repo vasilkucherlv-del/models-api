@@ -865,12 +865,17 @@ app.get('/api/export', async (req, res) => {
   try {
     const sku = String(req.query.sku || '').trim();
     const { rows } = sku
-      ? await pool.query('SELECT sku, model FROM compatibility WHERE sku = $1 ORDER BY sku, model', [sku])
-      : await pool.query('SELECT sku, model FROM compatibility ORDER BY sku, model');
+      ? await pool.query('SELECT sku, model, code FROM compatibility WHERE sku = $1 ORDER BY sku, model', [sku])
+      : await pool.query('SELECT sku, model, code FROM compatibility ORDER BY sku, model');
     const map = new Map();
     for (const r of rows) {
       if (!map.has(r.sku)) map.set(r.sku, []);
-      map.get(r.sku).push(r.model);
+      const arr = map.get(r.sku);
+      arr.push(r.model);
+      // Індустріальні коди теж у пошукове поле — щоб пошук сайту (Meili) знаходив
+      // товар за кодом (напр. VCC4110S3N/XSP), а не лише за назвою моделі (SC4110).
+      // Поле приховане (не показується), тож коди лишаються не видимими для копіювання.
+      if (r.code) arr.push(r.code);
     }
     const items = Array.from(map, ([sku, models]) => ({ sku, models }));
     res.json({ count: rows.length, items });
