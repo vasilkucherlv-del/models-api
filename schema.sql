@@ -41,3 +41,13 @@ CREATE TABLE IF NOT EXISTS search_dismissed (
   q_norm     TEXT PRIMARY KEY,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Кліки на результат пошуку (перехід на товар) — для CTR і «показали, але не клікнули».
+CREATE TABLE IF NOT EXISTS search_click (
+  id         BIGSERIAL PRIMARY KEY,
+  q_norm     TEXT NOT NULL,
+  sku        TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_sclick_created ON search_click (created_at);
+CREATE INDEX IF NOT EXISTS idx_sclick_qnorm   ON search_click (q_norm);

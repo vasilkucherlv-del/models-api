@@ -97,6 +97,17 @@ app.post('/api/search-log', async (req, res) => {
   res.status(204).end();
 });
 
+// POST /api/search-click { q, sku }  — клік на результат пошуку (перехід на товар).
+app.post('/api/search-click', async (req, res) => {
+  try {
+    const q = String((req.body && req.body.q) || '').trim().replace(/\s+/g, ' ').toLowerCase().slice(0, 120);
+    if (q.length < 2) return res.status(204).end();
+    const sku = String((req.body && req.body.sku) || '').trim().slice(0, 60);
+    await pool.query('INSERT INTO search_click (q_norm, sku) VALUES ($1,$2)', [q, sku]);
+  } catch (e) { /* тихо */ }
+  res.status(204).end();
+});
+
 // GET /api/search-stats?days=30&limit=50&min=2  — очищений звіт.
 // Список «без результатів» фільтрується: довжина ≥ 3, повторів ≥ min (відсіює
 // разові одруківки) і без «опрацьованих». Так не доводиться гортати сміття.
@@ -107,7 +118,20 @@ app.get('/api/search-stats', async (req, res) => {
   const min = Math.min(Math.max(parseInt(req.query.min || '2', 10) || 2, 1), 50);
   try {
     const since = `now() - interval '${days} days'`;
-    const total = await pool.query(`SELECT count(*)::int AS n FROM search_log WHERE created_at >= ${since}`);
+    const agg = await pool.query(
+      `SELECT count(*)::int AS total, count(*) FILTER (WHERE hits = 0)::int AS zero
+         FROM search_log WHERE created_at >= ${since}`);
+    const total = agg.rows[0].total, zeroCnt = agg.rows[0].zero;
+    const zeroRate = total ? Math.round(zeroCnt * 100 / total) : 0;
+    const clicksRow = await pool.query(`SELECT count(*)::int AS n FROM search_click WHERE created_at >= ${since}`);
+    // Запити, що ДАЛИ результати, шукались ≥ min, але жодного кліку — видача нерелевантна.
+    const noClick = await pool.query(
+      `SELECT q_norm AS q, count(*)::int AS cnt
+         FROM search_log s
+        WHERE created_at >= ${since} AND hits > 0 AND char_length(q_norm) >= 3
+          AND q_norm NOT IN (SELECT q_norm FROM search_dismissed)
+          AND q_norm NOT IN (SELECT q_norm FROM search_click WHERE created_at >= ${since})
+        GROUP BY q_norm HAVING count(*) >= $1 ORDER BY cnt DESC, q_norm LIMIT $2`, [min, lim]);
     const top = await pool.query(
       `SELECT q_norm AS q, count(*)::int AS cnt, max(hits)::int AS max_hits
          FROM search_log WHERE created_at >= ${since} AND char_length(q_norm) >= 2
@@ -132,7 +156,10 @@ app.get('/api/search-stats', async (req, res) => {
             AND q_norm NOT IN (SELECT q_norm FROM search_dismissed)
           GROUP BY q_norm HAVING count(*) >= ${min}
        )`);
-    res.json({ days, min, total: total.rows[0].n, top: top.rows, zero: zero.rows, hiddenZero: hidden.rows[0].n });
+    res.json({
+      days, min, total, zeroCnt, zeroRate, clicks: clicksRow.rows[0].n,
+      top: top.rows, zero: zero.rows, noClick: noClick.rows, hiddenZero: hidden.rows[0].n
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'server_error' });
@@ -691,6 +718,7 @@ button:disabled{opacity:.6;cursor:default}.hint{color:#6b7280;font-size:13px;mar
 .danger-card{border-left:4px solid #d1242f}
 select{margin-top:4px;padding:10px 12px;font-size:15px;border:1px solid #d0d7de;border-radius:8px;font-family:inherit}
 .saout{margin-top:14px;font-size:14px}
+.sasum{margin-bottom:6px;font-size:15px}.sasum b{color:#1f2328}
 .sacols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
 @media(max-width:640px){.sacols{grid-template-columns:1fr}}
 .satab{width:100%;border-collapse:collapse;margin-top:6px;font-size:13px}
@@ -967,9 +995,17 @@ function saLoad(){
         rows.forEach(function(r){ h+='<tr><td>'+esc(r.q)+'</td><td>'+r.cnt+'</td><td><button class="sadis" data-q="'+esc(r.q)+'" style="margin:0;padding:3px 8px;font-size:12px;background:#6b7280">опрацьовано</button></td></tr>'; });
         return h+'</table>';
       }
+      function noClickTbl(rows){
+        if(!rows||!rows.length) return '<b>🖱 Показали, але не клікнули</b><div class="hint">— порожньо —</div>';
+        var h='<b>🖱 Показали, але не клікнули</b> <span class="hint">(результати були, та жодного переходу — можливо, видача нерелевантна)</span>'
+          +'<table class="satab"><tr><th>Запит</th><th>Разів</th></tr>';
+        rows.forEach(function(r){ h+='<tr><td>'+esc(r.q)+'</td><td>'+r.cnt+'</td></tr>'; });
+        return h+'</table>';
+      }
       saOut.className='saout'; saOut.style.display='block';
-      saOut.innerHTML='<div class="hint">Усього пошуків за '+d.days+' дн.: '+d.total+' · приховано разових/опрацьованих нулів: '+(d.hiddenZero||0)+'</div>'
-        +'<div class="sacols">'+topTbl(d.top)+zeroTbl(d.zero)+'</div>';
+      saOut.innerHTML='<div class="sasum">Пошуків: <b>'+d.total+'</b> · Без результату: <b>'+d.zeroCnt+' ('+d.zeroRate+'%)</b> · Кліків: <b>'+d.clicks+'</b> <span class="hint">· приховано разових/опрацьованих нулів: '+(d.hiddenZero||0)+'</span></div>'
+        +'<div class="sacols">'+topTbl(d.top)+zeroTbl(d.zero)+'</div>'
+        +'<div style="margin-top:14px">'+noClickTbl(d.noClick)+'</div>';
       saOut.querySelectorAll('.sadis').forEach(function(b){ b.onclick=function(){
         b.disabled=true;
         fetch('/api/search-dismiss',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},body:JSON.stringify({q:b.getAttribute('data-q')})})

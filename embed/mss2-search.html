@@ -250,7 +250,7 @@
       if(e.key==='Escape'){ close(); return; }
       if(!['ArrowDown','ArrowUp','Enter'].includes(e.key)) return;
       var items=[].slice.call(results.querySelectorAll('.mss2-item')); if(!items.length) return;
-      if(e.key==='Enter'){ if(state.kbd>=0&&items[state.kbd]){ var u=items[state.kbd].getAttribute('data-url'); if(u&&u!=='#') location.href=u; } return; }
+      if(e.key==='Enter'){ if(state.kbd>=0&&items[state.kbd]){ var it=items[state.kbd], u=it.getAttribute('data-url'); if(u&&u!=='#'){ logClick(it.getAttribute('data-sku')); location.href=u; } } return; }
       e.preventDefault();
       if(e.key==='ArrowDown') state.kbd=Math.min((state.kbd<0?-1:state.kbd)+1,items.length-1);
       else state.kbd=Math.max((state.kbd<0?0:state.kbd)-1,0);
@@ -375,11 +375,14 @@
     var art=h.sku?(' · <span class="mss2-art" data-a="'+esc(h.sku)+'">Код: '+esc(h.sku)+'</span>'):'';
     var url=h.url||'#';
     var cls=h.available?'mss2-item':'mss2-item mss2-off';
-    return '<div class="'+cls+'" data-url="'+esc(url)+'">'+pic
+    return '<div class="'+cls+'" data-url="'+esc(url)+'" data-sku="'+esc(h.sku||'')+'">'+pic
       +'<div class="mss2-info"><a class="mss2-name" href="'+esc(url)+'">'+esc(h.name)+'</a>'
       +'<div class="mss2-price">'+price+'</div><div class="mss2-status">'+av+art+'</div></div></div>';
   }
-  function bindCards(){ results.querySelectorAll('.mss2-art').forEach(function(el){ el.onclick=function(ev){ ev.preventDefault(); ev.stopPropagation(); if(navigator.clipboard) navigator.clipboard.writeText(el.getAttribute('data-a')); toast('Код скопійовано: '+el.getAttribute('data-a')); }; }); }
+  function bindCards(){
+    results.querySelectorAll('.mss2-art').forEach(function(el){ el.onclick=function(ev){ ev.preventDefault(); ev.stopPropagation(); if(navigator.clipboard) navigator.clipboard.writeText(el.getAttribute('data-a')); toast('Код скопійовано: '+el.getAttribute('data-a')); }; });
+    results.querySelectorAll('.mss2-item').forEach(function(it){ var a=it.querySelector('.mss2-name'); if(a) a.addEventListener('click', function(){ logClick(it.getAttribute('data-sku')); }); });
+  }
 
   function getRecent(){ try{ return JSON.parse(localStorage.getItem('ms_recent')||'[]'); }catch(e){ return []; } }
   function pushRecent(v){ try{ if(!v||v.length<2)return; var r=getRecent().filter(function(x){return x!==v;}); r.unshift(v); localStorage.setItem('ms_recent',JSON.stringify(r.slice(0,8))); }catch(e){} }
@@ -414,6 +417,15 @@
     try{
       fetch(LOG_URL, { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ q: qq, hits: state.total, source: 'site' }), keepalive:true }).catch(function(){});
+    }catch(e){}
+  }
+  // Клік на результат (перехід на товар) — для CTR і «показали, але не клікнули».
+  function logClick(sku){
+    if(!LOG_URL) return;
+    var qq=state.q; if(!qq || qq.length<2) return;
+    try{
+      fetch(LOG_URL.replace('/search-log','/search-click'), { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ q: qq, sku: sku||'' }), keepalive:true }).catch(function(){});
     }catch(e){}
   }
 
