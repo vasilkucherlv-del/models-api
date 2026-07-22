@@ -129,12 +129,25 @@
   // Запит без кирилиці — це модель або індустріальний код: шукаємо його ФРАЗОЮ
   // (слова поряд), щоб «AR 103» не збігалось випадково зі шматками різних записів
   // (напр. суфікс країни *AR + код …-103.0). Назви (кирилиця) — як раніше, по словах.
-  function qNorm(){
-    var s = normDims(state.q).trim();
+  function qNormOf(raw){
+    var q = String(raw == null ? '' : raw);
+    // прибрати «недодрукований» хвіст розміру: трейлінг роздільник(и)/кома після цифри
+    // (напр. «25*47*8/» → «25*47*8»), щоб показувати товари базового розміру
+    q = q.replace(/(\d)[\s\/*x×хХ·∙•⋅✕✖⨯,]+$/i, '$1');
+    var s = normDims(q).trim();
     if (s && !/[а-яёіїєґА-ЯЁІЇЄҐ]/.test(s)) {
       return '"' + s.replace(/"/g, ' ').replace(/\s+/g, ' ').trim() + '"';
     }
     return s.replace(/\d+(?:p\d+)?(?:x\d+(?:p\d+)?)+/g, '"$&"');
+  }
+  function qNorm(){ return qNormOf(state.q); }
+  // База розміру, якщо введено НЕДОДРУКОВАНИЙ останній розмір (напр. «25*47*8/1» →
+  // «25*47*8»). Потрібна лише коли повний запит нічого не знайшов — тоді пропонуємо
+  // товари базового розміру. null, якщо це не «розмір + недодрукований хвіст».
+  function dimBase(raw){
+    var s = String(raw == null ? '' : raw).trim();
+    var m = s.match(/^(.+\d(?:[ \t]*[*x×хХ·∙•⋅✕✖⨯][ \t]*\d+(?:[.,]\d+)?)+)[ \t]*[\/*x×хХ·∙•⋅✕✖⨯][ \t]*\d*(?:[.,]\d*)?$/i);
+    return m ? m[1].trim() : null;
   }
 
   // ── Підказка-виправлення «Можливо, ви шукали…» ──
@@ -313,21 +326,34 @@
   }
 
   function renderFlat(reset){
-    if(reset){ state.offset=0; state.hits=[]; state.kbd=-1; }
-    var body={q:qNorm(),limit:state.limit,offset:state.offset,matchingStrategy:'all'}; var s=sortArr(); if(s) body.sort=s;
-    var f=filters(); if(f) body.filter=f;
-    return searchSafe(body).then(function(d){
+    if(reset){ state.offset=0; state.hits=[]; state.kbd=-1; state.baseNote=null; state.effQ=qNorm(); }
+    var srt=sortArr();
+    function mkBody(qs){ var b={q:qs,limit:state.limit,offset:state.offset,matchingStrategy:'all'}; if(srt) b.sort=srt; var f=filters(); if(f) b.filter=f; return b; }
+    var run;
+    if(reset){
+      run=searchSafe(mkBody(state.effQ)).then(function(d){
+        // Недодрукований розмір (25*47*8/1) → повний нічого не дав: пропонуємо базовий розмір.
+        if((d.estimatedTotalHits||0)===0){
+          var base=dimBase(state.q);
+          if(base){ var bq=qNormOf(base);
+            if(bq && bq!==state.effQ){ return searchSafe(mkBody(bq)).then(function(d2){
+              if((d2.estimatedTotalHits||0)>0){ state.baseNote=base; state.effQ=bq; return d2; } return d; }); }
+          }
+        }
+        return d;
+      });
+    } else { run=searchSafe(mkBody(state.effQ)); }
+    return run.then(function(d){
       state.total=d.estimatedTotalHits||0;
       state.hits=reset?d.hits:state.hits.concat(d.hits);
-      // гарантія порядку: в наявності зверху (стабільне сортування зберігає релевантність усередині груп),
-      // навіть якщо сортування Meili недоступне на індексі
       state.hits.sort(function(a,b){ return (b.available?1:0)-(a.available?1:0); });
       countEl.textContent='Знайдено: '+state.total;
       if(reset&&state.hits.length) pushRecent(state.q);
       var html='';
       if(!state.hits.length){ html='<div class="mss2-empty">Нічого не знайдено за «'+esc(state.q)+'».</div>'; }
       else{
-        html='<div class="mss2-cards">';
+        if(state.baseNote) html+='<div class="mss2-rt">Точного «'+esc(state.q)+'» немає. Показано товари розміру «'+esc(state.baseNote)+'»:</div>';
+        html+='<div class="mss2-cards">';
         var prevAvail=null;
         state.hits.forEach(function(h){
           var a=!!h.available;
