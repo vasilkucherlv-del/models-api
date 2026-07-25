@@ -80,6 +80,25 @@ app.get('/api/skus', async (req, res) => {
   }
 });
 
+// Аудит сумісності: по кожному товару з базою — к-ть моделей, бренди, скільки
+// моделей із ПОРОЖНІМ брендом («інші»). Для звірки з повним каталогом.
+app.get('/api/audit', async (req, res) => {
+  if (!hasManagerKey(req)) return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT sku,
+              count(*)::int AS n,
+              count(*) FILTER (WHERE btrim(coalesce(brand,'')) = '')::int AS empty,
+              coalesce(string_agg(DISTINCT NULLIF(btrim(brand),''), ', '), '') AS brands
+         FROM compatibility
+        GROUP BY sku ORDER BY sku`);
+    res.json({ count: rows.length, items: rows });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
 // === Аналітика пошуку ===
 // POST /api/search-log { q, hits, source }  — публічний прийом логів із сайту.
 // Захищений лише перевіркою довжини; ніколи не ламає сайт (завжди 204).
@@ -786,6 +805,10 @@ WISL 105"></textarea>
   з експортом сайту (щоб знайти товари зовсім без даних про сумісність).</p>
   <button id="skuGo">Завантажити артикули (.txt)</button>
   <div class="out" id="skuOut"></div>
+  <p class="hint" style="margin-top:16px">Аудит сумісності: по кожному товару — к-ть моделей,
+  бренди і скільки моделей із порожнім брендом («інші»). Для звірки з повним каталогом.</p>
+  <button id="auditGo">Завантажити аудит сумісності (.csv)</button>
+  <div class="out" id="auditOut"></div>
 </div>
 
 <div class="card">
@@ -970,6 +993,30 @@ skuGo.onclick=function(){
     })
     .catch(function(e){show(skuOut,'bad','Помилка з\\'єднання: '+e.message);})
     .finally(function(){skuGo.disabled=false;});
+};
+
+// ── Службове: аудит сумісності (.csv) ──
+var auditGo=document.getElementById('auditGo'),auditOut=document.getElementById('auditOut');
+auditGo.onclick=function(){
+  if(!key()){alert('Введи ключ');return;}
+  auditGo.disabled=true; show(auditOut,'','Рахую…');
+  fetch('/api/audit',{headers:{'X-Import-Key':key()}})
+    .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+    .then(function(x){
+      if(!x.ok||!x.d.items){show(auditOut,'bad','Помилка: '+((x.d&&x.d.error)||'невідома')+(x.d&&x.d.error==='unauthorized'?' (невірний ключ)':''));return;}
+      var rows=['Артикул;К-ть моделей;Порожній бренд (інші);Бренди'], withEmpty=0;
+      x.d.items.forEach(function(it){
+        if(it.empty>0) withEmpty++;
+        rows.push([it.sku,it.n,it.empty,'"'+String(it.brands||'').replace(/"/g,'')+'"'].join(';'));
+      });
+      var blob=new Blob(['\\ufeff'+rows.join('\\n')],{type:'text/csv;charset=utf-8'});
+      var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='audit_sumisnist.csv';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){URL.revokeObjectURL(a.href);},1000);
+      show(auditOut,'ok','Готово ✔ Товарів у базі: '+x.d.count+' · з порожнім брендом «інші»: '+withEmpty+'\\nФайл audit_sumisnist.csv завантажено.');
+    })
+    .catch(function(e){show(auditOut,'bad','Помилка з\\'єднання: '+e.message);})
+    .finally(function(){auditGo.disabled=false;});
 };
 
 // ── Аналітика пошуку ──
