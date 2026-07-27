@@ -141,6 +141,17 @@
     return s.replace(/\d+(?:p\d+)?(?:x\d+(?:p\d+)?)+/g, '"$&"');
   }
   function qNorm(){ return qNormOf(state.q); }
+  // Латиниця/код без розмірних груп у ФРАЗОВОМУ режимі («mr 70wh») може нічого не
+  // знайти, якщо в базі модель записана з іншим пробілом («MR 70 WH»). Тоді пробуємо
+  // той самий запит БЕЗ лапок — пошук по всіх словах. Повертає рядок або null (коли
+  // це кирилиця або розмір — там фразовий режим лишається обовʼязковим).
+  function qPlainOf(raw){
+    var q = String(raw == null ? '' : raw);
+    q = q.replace(/(\d)[\s\/*x×хХ·∙•⋅✕✖⨯,]+$/i, '$1');
+    var s = normDims(q).trim();
+    if (s && !/[а-яёіїєґА-ЯЁІЇЄҐ]/.test(s) && !/\d+(?:p\d+)?(?:x\d+(?:p\d+)?)+/.test(s)) return s;
+    return null;
+  }
   // База розміру, якщо введено НЕДОДРУКОВАНИЙ останній розмір (напр. «25*47*8/1» →
   // «25*47*8»). Потрібна лише коли повний запит нічого не знайшов — тоді пропонуємо
   // товари базового розміру. null, якщо це не «розмір + недодрукований хвіст».
@@ -300,6 +311,15 @@
     return search({q:qNorm(),limit:0,facets:['category'],matchingStrategy:'all'}).then(function(d){ state.catAvailable=true; return d; })
       .catch(function(){ state.catAvailable=false; return search({q:qNorm(),limit:0,matchingStrategy:'all'}); })
       .then(function(d){
+        // Фраза (латиниця/код) нічого не дала → пробуємо по всіх словах, щоб і лічильник,
+        // і категорії відповідали тому, що покаже renderFlat («mr 70wh»).
+        var pl=qPlainOf(state.q);
+        if((d.estimatedTotalHits||0)===0 && pl && pl!==qNorm()){
+          return search({q:pl,limit:0,facets:['category'],matchingStrategy:'all'}).then(function(d2){ return d2; }).catch(function(){ return d; });
+        }
+        return d;
+      })
+      .then(function(d){
         state.catDist=(d.facetDistribution&&d.facetDistribution.category)||{};
         state.total=d.estimatedTotalHits||0; renderSide();
         noteEl.textContent=(state.catAvailable===false)?'категорії з\'являться після оновлення каталогу':'';
@@ -329,16 +349,25 @@
     if(reset){ state.offset=0; state.hits=[]; state.kbd=-1; state.baseNote=null; state.effQ=qNorm(); }
     var srt=sortArr();
     function mkBody(qs){ var b={q:qs,limit:state.limit,offset:state.offset,matchingStrategy:'all'}; if(srt) b.sort=srt; var f=filters(); if(f) b.filter=f; return b; }
+    // Недодрукований розмір (25*47*8/1) → повний нічого не дав: пропонуємо базовий розмір.
+    function dimFallback(d){
+      var base=dimBase(state.q);
+      if(base){ var bq=qNormOf(base);
+        if(bq && bq!==state.effQ){ return searchSafe(mkBody(bq)).then(function(d2){
+          if((d2.estimatedTotalHits||0)>0){ state.baseNote=base; state.effQ=bq; return d2; } return d; }); }
+      }
+      return d;
+    }
     var run;
     if(reset){
       run=searchSafe(mkBody(state.effQ)).then(function(d){
-        // Недодрукований розмір (25*47*8/1) → повний нічого не дав: пропонуємо базовий розмір.
         if((d.estimatedTotalHits||0)===0){
-          var base=dimBase(state.q);
-          if(base){ var bq=qNormOf(base);
-            if(bq && bq!==state.effQ){ return searchSafe(mkBody(bq)).then(function(d2){
-              if((d2.estimatedTotalHits||0)>0){ state.baseNote=base; state.effQ=bq; return d2; } return d; }); }
-          }
+          // Латиниця/код фразою нічого не дав → пробуємо по всіх словах («mr 70wh»).
+          var pl=qPlainOf(state.q);
+          if(pl && pl!==state.effQ){ return searchSafe(mkBody(pl)).then(function(dp){
+            if((dp.estimatedTotalHits||0)>0){ state.effQ=pl; return dp; }
+            return dimFallback(d); }); }
+          return dimFallback(d);
         }
         return d;
       });
