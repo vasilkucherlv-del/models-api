@@ -129,6 +129,17 @@
   // Запит без кирилиці — це модель або індустріальний код: шукаємо його ФРАЗОЮ
   // (слова поряд), щоб «AR 103» не збігалось випадково зі шматками різних записів
   // (напр. суфікс країни *AR + код …-103.0). Назви (кирилиця) — як раніше, по словах.
+  // Канонічна форма латиниці/коду: пробіл на кожній межі буква↔цифра, роздільники →
+  // пробіл. Так «MR 70WH», «MR70WH», «mr 70 wh» дають ОДНАКОВЕ «MR 70 WH» — пробіл
+  // більше не впливає на результат.
+  function canonAlnum(s){
+    return String(s).toUpperCase()
+      .replace(/([A-Z])(\d)/g, '$1 $2')
+      .replace(/(\d)([A-Z])/g, '$1 $2')
+      .replace(/[^0-9A-Z]+/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+  }
+  var DIM_RE = /\d+(?:p\d+)?(?:x\d+(?:p\d+)?)+/;
   function qNormOf(raw){
     var q = String(raw == null ? '' : raw);
     // прибрати «недодрукований» хвіст розміру: трейлінг роздільник(и)/кома після цифри
@@ -136,20 +147,32 @@
     q = q.replace(/(\d)[\s\/*x×хХ·∙•⋅✕✖⨯,]+$/i, '$1');
     var s = normDims(q).trim();
     if (s && !/[а-яёіїєґА-ЯЁІЇЄҐ]/.test(s)) {
-      return '"' + s.replace(/"/g, ' ').replace(/\s+/g, ' ').trim() + '"';
+      // розмір (13.5*5 → 5x13p5) лишаємо фразою без канонізації, щоб не сплутати розміри
+      if (DIM_RE.test(s)) return '"' + s.replace(/"/g, ' ').replace(/\s+/g, ' ').trim() + '"';
+      // латиниця/код → КАНОНІЧНА фраза: пробіл не впливає, а фраза не дає сміття
+      // (слова саме поряд, тож «70wh» не збіжиться з купою «…70… …wh…»).
+      var c = canonAlnum(s);
+      return c ? '"' + c + '"' : '';
     }
     return s.replace(/\d+(?:p\d+)?(?:x\d+(?:p\d+)?)+/g, '"$&"');
   }
   function qNorm(){ return qNormOf(state.q); }
-  // Латиниця/код без розмірних груп у ФРАЗОВОМУ режимі («mr 70wh») може нічого не
-  // знайти, якщо в базі модель записана з іншим пробілом («MR 70 WH»). Тоді пробуємо
-  // той самий запит БЕЗ лапок — пошук по всіх словах. Повертає рядок або null (коли
-  // це кирилиця або розмір — там фразовий режим лишається обовʼязковим).
+  // Резерв для ЗЛИТИХ індустріальних кодів, які Meili тримає одним токеном
+  // (напр. «VCC4110S3N» — канонічний розбив «VCC 4110 S 3 N» їх НЕ знаходить).
+  // Фраза з мінімальним нормуванням (як було раніше). null — коли це кирилиця/розмір.
+  function qRawPhraseOf(raw){
+    var q = String(raw == null ? '' : raw).replace(/(\d)[\s\/*x×хХ·∙•⋅✕✖⨯,]+$/i, '$1');
+    var s = normDims(q).trim();
+    if (s && !/[а-яёіїєґА-ЯЁІЇЄҐ]/.test(s) && !DIM_RE.test(s))
+      return '"' + s.replace(/"/g, ' ').replace(/\s+/g, ' ').trim() + '"';
+    return null;
+  }
+  // Остання спроба (найширша): латиниця/код по всіх словах, без лапок.
   function qPlainOf(raw){
     var q = String(raw == null ? '' : raw);
     q = q.replace(/(\d)[\s\/*x×хХ·∙•⋅✕✖⨯,]+$/i, '$1');
     var s = normDims(q).trim();
-    if (s && !/[а-яёіїєґА-ЯЁІЇЄҐ]/.test(s) && !/\d+(?:p\d+)?(?:x\d+(?:p\d+)?)+/.test(s)) return s;
+    if (s && !/[а-яёіїєґА-ЯЁІЇЄҐ]/.test(s) && !DIM_RE.test(s)) return s;
     return null;
   }
   // База розміру, якщо введено НЕДОДРУКОВАНИЙ останній розмір (напр. «25*47*8/1» →
@@ -159,6 +182,13 @@
     var s = String(raw == null ? '' : raw).trim();
     var m = s.match(/^(.+\d(?:[ \t]*[*x×хХ·∙•⋅✕✖⨯][ \t]*\d+(?:[.,]\d+)?)+)[ \t]*[\/*x×хХ·∙•⋅✕✖⨯][ \t]*\d*(?:[.,]\d*)?$/i);
     return m ? m[1].trim() : null;
+  }
+  // Кандидати запиту в порядку точності: канонічна фраза → зл. код фразою → по словах.
+  // Кожен наступний пробуємо лише коли попередній дав 0 — тож точні запити не «псуються».
+  function orderedQ(){
+    var out=[qNorm()];
+    [qRawPhraseOf(state.q), qPlainOf(state.q)].forEach(function(x){ if(x && out.indexOf(x)<0) out.push(x); });
+    return out.filter(function(x){ return x!==''; });
   }
 
   // ── Підказка-виправлення «Можливо, ви шукали…» ──
@@ -308,22 +338,22 @@
 
   function loadFacets(){
     if(!state.q){ side.innerHTML=''; if(gridEl) gridEl.classList.add('mss2-noside'); hideCatToggle(); state.total=0; return Promise.resolve(); }
-    return search({q:qNorm(),limit:0,facets:['category'],matchingStrategy:'all'}).then(function(d){ state.catAvailable=true; return d; })
-      .catch(function(){ state.catAvailable=false; return search({q:qNorm(),limit:0,matchingStrategy:'all'}); })
-      .then(function(d){
-        // Фраза (латиниця/код) нічого не дала → пробуємо по всіх словах, щоб і лічильник,
-        // і категорії відповідали тому, що покаже renderFlat («mr 70wh»).
-        var pl=qPlainOf(state.q);
-        if((d.estimatedTotalHits||0)===0 && pl && pl!==qNorm()){
-          return search({q:pl,limit:0,facets:['category'],matchingStrategy:'all'}).then(function(d2){ return d2; }).catch(function(){ return d; });
-        }
-        return d;
-      })
-      .then(function(d){
-        state.catDist=(d.facetDistribution&&d.facetDistribution.category)||{};
-        state.total=d.estimatedTotalHits||0; renderSide();
-        noteEl.textContent=(state.catAvailable===false)?'категорії з\'являться після оновлення каталогу':'';
-      }).catch(function(){});
+    var cands=orderedQ();
+    // той самий перебір кандидатів, що й у renderFlat — щоб лічильник і категорії збігались.
+    function attempt(i){
+      var q=cands[i];
+      return search({q:q,limit:0,facets:['category'],matchingStrategy:'all'}).then(function(d){ state.catAvailable=true; return d; })
+        .catch(function(){ state.catAvailable=false; return search({q:q,limit:0,matchingStrategy:'all'}); })
+        .then(function(d){
+          if((d.estimatedTotalHits||0)===0 && i<cands.length-1) return attempt(i+1);
+          return d;
+        });
+    }
+    return attempt(0).then(function(d){
+      state.catDist=(d.facetDistribution&&d.facetDistribution.category)||{};
+      state.total=d.estimatedTotalHits||0; renderSide();
+      noteEl.textContent=(state.catAvailable===false)?'категорії з\'являться після оновлення каталогу':'';
+    }).catch(function(){});
   }
   // мобільний трей категорій
   function showCatToggle(n){ if(!catToggle) return; catToggle.classList.add('mss2-show'); var l=catToggle.querySelector('.mss2-catlabel-t'); if(l) l.textContent='Категорії ('+n+')'; }
@@ -358,17 +388,19 @@
       }
       return d;
     }
+    // Перебір кандидатів запиту (canonical → зл.код → по словах), кожен наступний —
+    // лише коли попередній дав 0. Виграшний запит фіксуємо в state.effQ (для пагінації).
+    function firstHit(cands, i){
+      var q=cands[i]; state.effQ=q;
+      return searchSafe(mkBody(q)).then(function(d){
+        if((d.estimatedTotalHits||0)>0 || i>=cands.length-1) return d;
+        return firstHit(cands, i+1);
+      });
+    }
     var run;
     if(reset){
-      run=searchSafe(mkBody(state.effQ)).then(function(d){
-        if((d.estimatedTotalHits||0)===0){
-          // Латиниця/код фразою нічого не дав → пробуємо по всіх словах («mr 70wh»).
-          var pl=qPlainOf(state.q);
-          if(pl && pl!==state.effQ){ return searchSafe(mkBody(pl)).then(function(dp){
-            if((dp.estimatedTotalHits||0)>0){ state.effQ=pl; return dp; }
-            return dimFallback(d); }); }
-          return dimFallback(d);
-        }
+      run=firstHit(orderedQ(), 0).then(function(d){
+        if((d.estimatedTotalHits||0)===0) return dimFallback(d);
         return d;
       });
     } else { run=searchSafe(mkBody(state.effQ)); }
