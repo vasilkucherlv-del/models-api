@@ -38,6 +38,15 @@ CREATE TABLE IF NOT EXISTS analogs_manual (
 );
 CREATE INDEX IF NOT EXISTS idx_analogs_manual_rev ON analogs_manual (analog_sku);
 
+-- Виключення з аналогів (задає власник у /admin): пара більше не пропонується
+-- автоматикою в ОБИДВА боки (напр. чаша 500мл ≠ чаша 350мл, хоч моделі спільні).
+CREATE TABLE IF NOT EXISTS analogs_exclude (
+  sku      TEXT NOT NULL,
+  excl_sku TEXT NOT NULL,
+  PRIMARY KEY (sku, excl_sku)
+);
+CREATE INDEX IF NOT EXISTS idx_analogs_exclude_rev ON analogs_exclude (excl_sku);
+
 -- Лог пошукових запитів сайту (аналітика: топ запитів і запити без результатів).
 CREATE TABLE IF NOT EXISTS search_log (
   id         BIGSERIAL PRIMARY KEY,
