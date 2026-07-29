@@ -262,7 +262,10 @@ app.get('/widget.js', (req, res) => {
       + 'var sku=metaSku();if(!sku)return;'
       + 'fetch(API_DEFAULT+\'/api/brands?sku=\'+encodeURIComponent(sku)).then(function(r){return r.json();}).then(function(d){'
       + 'if(window.__lcBooted||!d||!d.total)return;var sec=makeBlock();if(insertBlock(sec)){window.__lcBooted=1;run(sec.querySelector(\'.lartek-compat-mount\'));}}).catch(function(){});}'
-      + 'if(document.readyState===\'loading\')document.addEventListener(\'DOMContentLoaded\',boot);else boot();})();';
+      + 'if(document.readyState===\'loading\')document.addEventListener(\'DOMContentLoaded\',boot);else boot();'
+      // Вкладка «Аналоги»: догружаємо analogs.js (сам нічого не робить, якщо вкладки немає)
+      + 'if(!window.__laScript){window.__laScript=1;var las=document.createElement(\'script\');las.src=API_DEFAULT+\'/analogs.js\';las.defer=true;document.head.appendChild(las);}'
+      + '})();';
     res.set('Content-Type', 'application/javascript; charset=utf-8');
     res.set('Cache-Control', 'public, max-age=300');
     res.set('Access-Control-Allow-Origin', '*');
@@ -300,6 +303,29 @@ app.get('/mss2.js', (req, res) => {
   }
 });
 
+// === Блок «Аналоги / заміна товару» одним файлом ===
+// У Horoshop (шаблон товару): <script src=".../analogs.js" defer></script>.
+// Дані — /api/analogs (спільні сумісні моделі) + картки товарів з Meilisearch.
+let _analogs = null;
+function analogsBody() {
+  if (_analogs) return _analogs;
+  const html = fs.readFileSync(path.join(__dirname, 'embed', 'analogs-widget.html'), 'utf8');
+  _analogs = (html.match(/<script>([\s\S]*?)<\/script>/) || [, ''])[1];
+  return _analogs;
+}
+app.get('/analogs.js', (req, res) => {
+  try {
+    res.set('Content-Type', 'application/javascript; charset=utf-8');
+    res.set('Cache-Control', 'public, max-age=300');
+    res.set('Access-Control-Allow-Origin', '*');
+    const origin = (req.get('x-forwarded-proto') || req.protocol) + '://' + req.get('host');
+    res.send(analogsBody().replace("var API=''", 'var API=' + JSON.stringify(origin)));
+  } catch (e) {
+    console.error(e);
+    res.status(500).send('// analogs error');
+  }
+});
+
 // === Бренди товару + кількість моделей (для випадайки зліва) ===
 // GET /api/brands?sku=DEMO123 → { total, brands:[{brand,count}] }
 app.get('/api/brands', limiter, async (req, res) => {
@@ -314,6 +340,77 @@ app.get('/api/brands', limiter, async (req, res) => {
     );
     const total = rows.reduce((n, r) => n + r.count, 0);
     return res.json({ total, brands: rows });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// === Картки товарів (назва, фото, ціна, наявність) для вкладки «Аналоги» ===
+// GET /api/cards?skus=0311,0301 → { cards:[{sku,name,price,url,picture,available,category}] }
+// Сервер сам бере дані з каталожного індексу — сайт до пошуку не звертається.
+const CATALOG_HOST = process.env.MEILI_HOST || 'https://getmeilimeilisearchv190-production-7c60.up.railway.app';
+const CATALOG_KEY  = process.env.MEILI_SEARCH_KEY || '018c2bbb344df2da9b898c089ad7b067c5b780d1a619024b14fc8909b728e4e2'; // search-only
+const _cardCache = new Map(); // sku → { t, card } (5 хв)
+app.get('/api/cards', limiter, async (req, res) => {
+  try {
+    const skus = String(req.query.skus || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 20);
+    if (!skus.length) return res.status(400).json({ error: 'skus_required' });
+    const now = Date.now();
+    if (_cardCache.size > 5000) _cardCache.clear();
+    const bySku = {}; const need = [];
+    for (const s of skus) {
+      const c = _cardCache.get(s);
+      if (c && now - c.t < 5 * 60 * 1000) bySku[s] = c.card; else need.push(s);
+    }
+    if (need.length) {
+      const queries = need.map(s => ({
+        indexUid: 'products', q: '"' + s.replace(/"/g, '') + '"', limit: 1,
+        attributesToRetrieve: ['sku', 'name', 'price', 'url', 'picture', 'available', 'category'],
+      }));
+      const r = await fetch(CATALOG_HOST + '/multi-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CATALOG_KEY },
+        body: JSON.stringify({ queries }),
+      });
+      const d = await r.json();
+      const rs = (d && d.results) || [];
+      need.forEach((s, i) => {
+        const h = rs[i] && rs[i].hits && rs[i].hits[0];
+        const card = (h && String(h.sku) === s) ? h : null;
+        _cardCache.set(s, { t: now, card });
+        bySku[s] = card;
+      });
+    }
+    return res.json({ cards: skus.map(s => bySku[s]).filter(Boolean) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// === Аналоги товару: інші артикули, сумісні з тими самими моделями ===
+// GET /api/analogs?sku=0311 → { count, items:[{sku, shared, own}] }
+// shared — скільки спільних моделей; own — скільки моделей у самого товару.
+// Поріг: щонайменше 3 спільні моделі (або всі, якщо у товару їх менше трьох) —
+// щоб випадковий збіг по одній моделі не робив товари «аналогами».
+app.get('/api/analogs', limiter, async (req, res) => {
+  try {
+    const sku = String(req.query.sku || '').trim();
+    if (!sku) return res.status(400).json({ error: 'sku_required' });
+    const { rows } = await pool.query(
+      `WITH own AS (SELECT model_norm FROM compatibility WHERE sku = $1)
+       SELECT c.sku, COUNT(*)::int AS shared,
+              (SELECT COUNT(*) FROM own)::int AS own
+         FROM compatibility c JOIN own o USING (model_norm)
+        WHERE c.sku <> $1
+        GROUP BY c.sku
+       HAVING COUNT(*) >= LEAST(3, (SELECT COUNT(*) FROM own))
+        ORDER BY shared DESC
+        LIMIT 30`,
+      [sku]
+    );
+    return res.json({ count: rows.length, items: rows });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'server_error' });

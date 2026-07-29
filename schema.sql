@@ -24,6 +24,10 @@ CREATE INDEX IF NOT EXISTS idx_comp_sku
 CREATE INDEX IF NOT EXISTS idx_comp_model_trgm
   ON compatibility USING gin (model_norm gin_trgm_ops);
 
+-- Btree по model_norm: швидкий JOIN «ті самі моделі» для /api/analogs
+CREATE INDEX IF NOT EXISTS idx_comp_model_norm
+  ON compatibility (model_norm);
+
 -- Лог пошукових запитів сайту (аналітика: топ запитів і запити без результатів).
 CREATE TABLE IF NOT EXISTS search_log (
   id         BIGSERIAL PRIMARY KEY,
