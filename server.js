@@ -300,6 +300,29 @@ app.get('/mss2.js', (req, res) => {
   }
 });
 
+// === Блок «Аналоги / заміна товару» одним файлом ===
+// У Horoshop (шаблон товару): <script src=".../analogs.js" defer></script>.
+// Дані — /api/analogs (спільні сумісні моделі) + картки товарів з Meilisearch.
+let _analogs = null;
+function analogsBody() {
+  if (_analogs) return _analogs;
+  const html = fs.readFileSync(path.join(__dirname, 'embed', 'analogs-widget.html'), 'utf8');
+  _analogs = (html.match(/<script>([\s\S]*?)<\/script>/) || [, ''])[1];
+  return _analogs;
+}
+app.get('/analogs.js', (req, res) => {
+  try {
+    res.set('Content-Type', 'application/javascript; charset=utf-8');
+    res.set('Cache-Control', 'public, max-age=300');
+    res.set('Access-Control-Allow-Origin', '*');
+    const origin = (req.get('x-forwarded-proto') || req.protocol) + '://' + req.get('host');
+    res.send(analogsBody().replace("var API=''", 'var API=' + JSON.stringify(origin)));
+  } catch (e) {
+    console.error(e);
+    res.status(500).send('// analogs error');
+  }
+});
+
 // === Бренди товару + кількість моделей (для випадайки зліва) ===
 // GET /api/brands?sku=DEMO123 → { total, brands:[{brand,count}] }
 app.get('/api/brands', limiter, async (req, res) => {
@@ -314,6 +337,34 @@ app.get('/api/brands', limiter, async (req, res) => {
     );
     const total = rows.reduce((n, r) => n + r.count, 0);
     return res.json({ total, brands: rows });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// === Аналоги товару: інші артикули, сумісні з тими самими моделями ===
+// GET /api/analogs?sku=0311 → { count, items:[{sku, shared, own}] }
+// shared — скільки спільних моделей; own — скільки моделей у самого товару.
+// Поріг: щонайменше 3 спільні моделі (або всі, якщо у товару їх менше трьох) —
+// щоб випадковий збіг по одній моделі не робив товари «аналогами».
+app.get('/api/analogs', limiter, async (req, res) => {
+  try {
+    const sku = String(req.query.sku || '').trim();
+    if (!sku) return res.status(400).json({ error: 'sku_required' });
+    const { rows } = await pool.query(
+      `WITH own AS (SELECT model_norm FROM compatibility WHERE sku = $1)
+       SELECT c.sku, COUNT(*)::int AS shared,
+              (SELECT COUNT(*) FROM own)::int AS own
+         FROM compatibility c JOIN own o USING (model_norm)
+        WHERE c.sku <> $1
+        GROUP BY c.sku
+       HAVING COUNT(*) >= LEAST(3, (SELECT COUNT(*) FROM own))
+        ORDER BY shared DESC
+        LIMIT 30`,
+      [sku]
+    );
+    return res.json({ count: rows.length, items: rows });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'server_error' });
