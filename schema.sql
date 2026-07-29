@@ -28,6 +28,16 @@ CREATE INDEX IF NOT EXISTS idx_comp_model_trgm
 CREATE INDEX IF NOT EXISTS idx_comp_model_norm
   ON compatibility (model_norm);
 
+-- Ручні аналоги (задає власник у /admin). Зв'язок двосторонній:
+-- якщо (A, B) є в таблиці — вкладка «Аналоги» показує B в A і A в B.
+CREATE TABLE IF NOT EXISTS analogs_manual (
+  sku        TEXT NOT NULL,                 -- артикул товару
+  analog_sku TEXT NOT NULL,                 -- артикул аналога
+  pos        INTEGER NOT NULL DEFAULT 0,    -- порядок показу
+  PRIMARY KEY (sku, analog_sku)
+);
+CREATE INDEX IF NOT EXISTS idx_analogs_manual_rev ON analogs_manual (analog_sku);
+
 -- Лог пошукових запитів сайту (аналітика: топ запитів і запити без результатів).
 CREATE TABLE IF NOT EXISTS search_log (
   id         BIGSERIAL PRIMARY KEY,

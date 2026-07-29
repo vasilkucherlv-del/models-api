@@ -389,16 +389,30 @@ app.get('/api/cards', limiter, async (req, res) => {
   }
 });
 
-// === Аналоги товару: інші артикули, сумісні з тими самими моделями ===
-// GET /api/analogs?sku=0311 → { count, items:[{sku, shared, own}] }
-// shared — скільки спільних моделей; own — скільки моделей у самого товару.
-// Поріг: щонайменше 3 спільні моделі (або всі, якщо у товару їх менше трьох) —
-// щоб випадковий збіг по одній моделі не робив товари «аналогами».
+// === Аналоги товару: РУЧНІ (задані власником) + АВТО (спільні моделі) ===
+// GET /api/analogs?sku=0311 → { count, items:[{sku, manual, shared, own}] }
+// Ручні — першими, у заданому порядку; зв'язок двосторонній (A↔B з одного запису).
+// Авто: shared — спільні моделі (мін. 3, або всі — якщо у товару їх менше трьох).
 app.get('/api/analogs', limiter, async (req, res) => {
   try {
     const sku = String(req.query.sku || '').trim();
     if (!sku) return res.status(400).json({ error: 'sku_required' });
-    const { rows } = await pool.query(
+    // ручні: прямий напрям за pos, зворотний — після нього
+    const man = await pool.query(
+      `SELECT analog_sku AS sku, 0 AS dir, pos FROM analogs_manual WHERE sku = $1
+       UNION ALL
+       SELECT sku AS sku, 1 AS dir, pos FROM analogs_manual WHERE analog_sku = $1
+       ORDER BY dir, pos`,
+      [sku]
+    );
+    const seen = new Set([sku]);
+    const items = [];
+    for (const r of man.rows) {
+      if (seen.has(r.sku)) continue;
+      seen.add(r.sku);
+      items.push({ sku: r.sku, manual: true });
+    }
+    const auto = await pool.query(
       `WITH own AS (SELECT model_norm FROM compatibility WHERE sku = $1)
        SELECT c.sku, COUNT(*)::int AS shared,
               (SELECT COUNT(*) FROM own)::int AS own
@@ -410,10 +424,65 @@ app.get('/api/analogs', limiter, async (req, res) => {
         LIMIT 30`,
       [sku]
     );
-    return res.json({ count: rows.length, items: rows });
+    for (const r of auto.rows) {
+      if (items.length >= 30) break;
+      if (seen.has(r.sku)) continue;
+      seen.add(r.sku);
+      items.push({ sku: r.sku, manual: false, shared: r.shared, own: r.own });
+    }
+    return res.json({ count: items.length, items });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// === Керування ручними аналогами (адмінка; повний ключ або MANAGER_KEY) ===
+// GET  /api/analogs-manual?sku=…      → { direct:[…], reverse:[…] }
+// POST /api/analogs-manual {sku, analogs:[…]} → замінити прямий список повністю
+//      (порожній масив = очистити; зворотні записи інших товарів не чіпаються).
+app.get('/api/analogs-manual', async (req, res) => {
+  if (!hasManagerKey(req)) return res.status(403).json({ error: 'bad_key' });
+  try {
+    const sku = String(req.query.sku || '').trim();
+    if (!sku) return res.status(400).json({ error: 'sku_required' });
+    const d = await pool.query(
+      'SELECT analog_sku FROM analogs_manual WHERE sku = $1 ORDER BY pos', [sku]);
+    const r = await pool.query(
+      'SELECT sku FROM analogs_manual WHERE analog_sku = $1 ORDER BY pos', [sku]);
+    res.json({ direct: d.rows.map(x => x.analog_sku), reverse: r.rows.map(x => x.sku) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+app.post('/api/analogs-manual', async (req, res) => {
+  if (!hasManagerKey(req)) return res.status(403).json({ error: 'bad_key' });
+  const client = await pool.connect();
+  try {
+    const sku = String((req.body && req.body.sku) || '').trim();
+    if (!sku) return res.status(400).json({ error: 'sku_required' });
+    const raw = Array.isArray(req.body.analogs) ? req.body.analogs : [];
+    const list = [];
+    for (const a of raw) {
+      const s = String(a || '').trim();
+      if (s && s !== sku && !list.includes(s)) list.push(s);
+    }
+    await client.query('BEGIN');
+    await client.query('DELETE FROM analogs_manual WHERE sku = $1', [sku]);
+    for (let i = 0; i < list.length; i++) {
+      await client.query(
+        'INSERT INTO analogs_manual (sku, analog_sku, pos) VALUES ($1,$2,$3)',
+        [sku, list[i], i]);
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, saved: list.length });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error(e);
+    res.status(500).json({ error: 'server_error' });
+  } finally {
+    client.release();
   }
 });
 
@@ -897,6 +966,22 @@ WISL 105"></textarea>
 </div>
 
 <div class="card">
+  <h2>Аналоги (вручну)</h2>
+  <p class="hint">Вкладка «Аналоги» на сайті наповнюється сама — за спільними сумісними
+  моделями. Тут можна ДОДАТКОВО задати ручні аналоги: вони показуються першими, саме у
+  вказаному порядку, без жодних фільтрів. Зв'язок двосторонній: якщо для 0311 вказати
+  0301 — на сторінці 0301 теж з'явиться 0311 (двічі вносити не треба).</p>
+  <label>Артикул товару</label>
+  <input id="anSku" type="text" placeholder="напр. 0311">
+  <button id="anShow">Показати поточні аналоги</button>
+  <div class="out" id="anCur"></div>
+  <label>Ручні аналоги (через кому, в порядку показу)</label>
+  <input id="anList" type="text" placeholder="напр. 0301, 0528">
+  <button id="anSave">Зберегти (замінює ручний список)</button>
+  <div class="out" id="anOut"></div>
+</div>
+
+<div class="card">
   <h2>Службове: артикули в базі</h2>
   <p class="hint">Завантажити список УСІХ артикулів, що вже мають моделі в базі — для звірки
   з експортом сайту (щоб знайти товари зовсім без даних про сумісність).</p>
@@ -1114,6 +1199,52 @@ auditGo.onclick=function(){
     })
     .catch(function(e){show(auditOut,'bad','Помилка з\\'єднання: '+e.message);})
     .finally(function(){auditGo.disabled=false;});
+};
+
+// ── Аналоги (вручну) ──
+var anSku=document.getElementById('anSku'),anList=document.getElementById('anList');
+var anShow=document.getElementById('anShow'),anSave=document.getElementById('anSave');
+var anCur=document.getElementById('anCur'),anOut=document.getElementById('anOut');
+anShow.onclick=function(){
+  var s=anSku.value.trim();
+  if(!key()||!s){show(anCur,'bad','Вкажи ключ і артикул.');return;}
+  anShow.disabled=true; show(anCur,'','Дивлюсь…');
+  Promise.all([
+    fetch('/api/analogs-manual?sku='+encodeURIComponent(s),{headers:{'X-Import-Key':key()}}).then(function(r){return r.json();}),
+    fetch('/api/analogs?sku='+encodeURIComponent(s)).then(function(r){return r.json();})
+  ]).then(function(res){
+    var m=res[0],a=res[1];
+    if(m&&m.error){show(anCur,'bad','Помилка: '+m.error+(m.error==='bad_key'?' (невірний ключ)':''));return;}
+    var auto=((a&&a.items)||[]).filter(function(x){return !x.manual;}).map(function(x){return x.sku;});
+    var t='Ручні (введені тут): '+((m.direct&&m.direct.length)?m.direct.join(', '):'—')
+      +'\\nРучні (прийшли з інших товарів): '+((m.reverse&&m.reverse.length)?m.reverse.join(', '):'—')
+      +'\\nАвто (зі спільних моделей): '+(auto.length?auto.join(', '):'—');
+    show(anCur,'ok',t);
+    anList.value=(m.direct||[]).join(', ');
+  }).catch(function(e){show(anCur,'bad','Помилка: '+e.message);})
+    .finally(function(){anShow.disabled=false;});
+};
+anSave.onclick=function(){
+  var s=anSku.value.trim();
+  if(!key()||!s){show(anOut,'bad','Вкажи ключ і артикул.');return;}
+  var list=anList.value.split(/[,;]/).map(function(x){return x.trim();}).filter(Boolean);
+  anSave.disabled=true; show(anOut,'','Зберігаю…');
+  fetch('/api/analogs-manual',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},body:JSON.stringify({sku:s,analogs:list})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(!d||d.error){show(anOut,'bad','Помилка: '+((d&&d.error)||'server')+((d&&d.error)==='bad_key'?' (невірний ключ)':''));return;}
+      if(!list.length){show(anOut,'ok','Ручний список очищено.');return;}
+      fetch('/api/cards?skus='+encodeURIComponent(list.join(',')))
+        .then(function(r){return r.json();})
+        .then(function(cd){
+          var okSkus=((cd&&cd.cards)||[]).map(function(c){return String(c.sku);});
+          var miss=list.filter(function(x){return okSkus.indexOf(x)<0;});
+          show(anOut,miss.length?'bad':'ok','Збережено: '+d.saved
+            +(miss.length?('\\nУВАГА: не знайдені в каталозі (перевір артикули): '+miss.join(', ')):''));
+        }).catch(function(){show(anOut,'ok','Збережено: '+d.saved);});
+    })
+    .catch(function(e){show(anOut,'bad','Помилка: '+e.message);})
+    .finally(function(){anSave.disabled=false;});
 };
 
 // ── Аналітика пошуку ──
