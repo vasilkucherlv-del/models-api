@@ -1,76 +1,107 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>Lartek — блок «Аналоги / заміна товару»</title>
+<title>Lartek — вкладка «Аналоги»</title>
 <!--
-  ЯК ПРАЦЮЄ
-  У Horoshop (шаблон товару) додається один рядок:
-      <script src="https://YOUR-models-api.up.railway.app/analogs.js" defer></script>
-  Скрипт сам:
-    1) бере артикул товару з <meta itemprop="sku">;
-    2) питає models-api /api/analogs?sku=… — інші артикули, сумісні з тими самими
-       моделями (мін. 3 спільні моделі, або всі — якщо у товару їх менше трьох);
-    3) підтягує картки цих товарів (назва, фото, ціна, наявність) з Meilisearch;
-    4) лишає тільки товари ТІЄЇ Ж категорії (щоб мішок не був «аналогом» фільтра);
-    5) малює блок «Аналоги / заміна товару» після вкладок товару.
-  Якщо аналогів немає — блок просто не з'являється.
+  ЯК ПРАЦЮЄ (так само, як вкладка «Сумісні моделі»)
+  1) У Horoshop на товарі створюється вкладка з назвою «Аналоги»
+     (або «Заміна товару» / «Замена товара») — вміст вкладки будь-який,
+     він буде замінений.
+  2) Цей скрипт (його автоматично підвантажує наявний widget.js — окремий
+     рядок у Horoshop додавати НЕ потрібно):
+     - знаходить вкладку «Аналоги» на сторінці;
+     - бере артикул товару з meta[itemprop=sku];
+     - питає models-api /api/analogs?sku=… (аналоги = товари, сумісні з тими
+       самими моделями: мін. 3 спільні; лише та сама категорія);
+     - картки товарів (назва, фото, ціна, наявність) бере з models-api
+       /api/cards — БЕЗ звернень до пошуку з боку сайту;
+     - малює список у вкладці. Якщо аналогів немає — ховає вкладку.
+  3) Якщо вкладки немає, але в описі товару є <div class="lartek-analogs-mount">
+     — малює у ньому (ручне розміщення).
 
-  Роздача: GET /analogs.js (server.js читає цей файл, бере вміст тегу скрипта
-  і підставляє var API='' → адресу сервера). Тут звичайний JS, БЕЗ шаблонних
-  рядків — файл читається як текст.
+  Роздача: GET /analogs.js (server.js бере вміст тегу скрипта і підставляє
+  var API='' → адресу сервера). Тут звичайний JS, без шаблонних рядків.
 -->
 <script>
 (function(){
   if (window.__laBooted) return; window.__laBooted = 1;
   var API='';
-  var HOST='https://getmeilimeilisearchv190-production-7c60.up.railway.app';
-  var KEY='018c2bbb344df2da9b898c089ad7b067c5b780d1a619024b14fc8909b728e4e2'; // search-only
-  var INDEX='products';
   var SHOW=4;      // скільки карток показувати одразу
-  var FETCH=12;    // скільки кандидатів перевіряти в Meili
+  var FETCH=12;    // скільки кандидатів перевіряти
 
   var isRu=/^\/ru(\/|$)/.test(location.pathname);
   var T=isRu
-    ? {title:'Аналоги / замена товара', code:'Код: ', ok:'В наличии', off:'Нет в наличии', more:'Показать ещё', price:function(p){return p?fmt(p)+' грн':'цена по запросу';}}
-    : {title:'Аналоги / заміна товару', code:'Код: ', ok:'В наявності', off:'Немає в наявності', more:'Показати ще', price:function(p){return p?fmt(p)+' грн':'ціна за запитом';}};
-
-  function metaSku(){ var m=document.querySelector('meta[itemprop="sku"]'); return m?String(m.getAttribute('content')||'').trim():''; }
-  var SKU='';
+    ? {code:'Код: ', ok:'В наличии', off:'Нет в наличии', more:'Показать ещё', empty:'Аналоги для этого товара пока не добавлены.', price:function(p){return p?fmt(p)+' грн':'цена по запросу';}}
+    : {code:'Код: ', ok:'В наявності', off:'Немає в наявності', more:'Показати ще', empty:'Аналоги для цього товару поки не додані.', price:function(p){return p?fmt(p)+' грн':'ціна за запитом';}};
 
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function fmt(n){ return Math.round(n).toLocaleString('uk-UA'); }
   function thumb(url,px){ if(!url) return ''; return 'https://wsrv.nl/?url='+encodeURIComponent(url)+'&w='+px+'&h='+px+'&fit=inside&output=webp'; }
+  function metaSku(){ var m=document.querySelector('meta[itemprop="sku"]'); return m?String(m.getAttribute('content')||'').trim():''; }
+  function norm2(s){ return String(s||'').toLowerCase().replace(/\s+/g,' ').trim(); }
 
-  // ── дані ──
+  // ── пошук вкладки «Аналоги» (той самий принцип, що вкладка «Сумісні моделі») ──
+  var TT=['аналоги','аналоги товару','аналоги товара','заміна товару','замена товара','аналоги / заміна товару','аналоги / замена товара','посмотреть замену товара','подивитись заміну товару'];
+  function findTab(){
+    var tabs=document.querySelectorAll('.product-heading__tab, [class*="heading__tab"]');
+    for(var i=0;i<tabs.length;i++){
+      var tt=norm2(tabs[i].textContent);
+      if(TT.indexOf(tt)>=0){
+        var id=(tabs[i].getAttribute('href')||'').replace(/^#/,'');
+        if(id){ var b=document.querySelector('[data-content-id="'+id+'"]')||document.getElementById(id);
+          if(b) return {panel:b, tab:tabs[i]}; }
+      }
+    }
+    var bl=document.querySelectorAll('[data-content-id], .j-product-block__tab, .product__section');
+    for(var j=0;j<bl.length;j++){
+      var tx=norm2(bl[j].textContent).slice(0,60);
+      if(/^аналог|^зам[іе]н|^посмотреть замену|^подивитись заміну/.test(tx)) return {panel:bl[j], tab:null};
+    }
+    return null;
+  }
+  function hideTab(f){
+    if(f.tab) f.tab.style.display='none';
+    if(f.panel) f.panel.style.display='none';
+  }
+
+  // ── запуск ──
   function boot(){
-  SKU=metaSku(); if(!SKU) return;
-  fetch(API+'/api/analogs?sku='+encodeURIComponent(SKU))
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      var items=(d&&d.items)||[]; if(!items.length) return;
-      var cand=items.slice(0,FETCH);
-      var A=['sku','name','price','url','picture','available','category'];
-      var queries=[{indexUid:INDEX,q:'"'+SKU+'"',limit:1,attributesToRetrieve:A}]
-        .concat(cand.map(function(it){ return {indexUid:INDEX,q:'"'+it.sku+'"',limit:1,attributesToRetrieve:A}; }));
-      return fetch(HOST+'/multi-search',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+KEY},body:JSON.stringify({queries:queries})})
-        .then(function(r){ return r.json(); })
-        .then(function(res){
-          var rs=(res&&res.results)||[];
-          function hitOf(i,sku){ var h=rs[i]&&rs[i].hits&&rs[i].hits[0]; return (h&&String(h.sku)===String(sku))?h:null; }
-          var cur=hitOf(0,SKU);
-          var out=[];
-          cand.forEach(function(it,i){
-            var h=hitOf(i+1,it.sku); if(!h) return;
-            if(cur&&cur.category&&h.category&&h.category!==cur.category) return; // лише та сама категорія
-            if(cur&&cur.url&&h.url&&h.url===cur.url) return;                      // не сам товар
-            out.push({h:h,shared:it.shared});
+    var mount=document.querySelector('.lartek-analogs-mount'), found=null;
+    if(!mount){
+      found=findTab(); if(!found) return;
+      mount=document.createElement('div');
+      found.panel.innerHTML=''; found.panel.appendChild(mount);
+    }
+    var sku=metaSku();
+    if(!sku){ if(found) hideTab(found); return; }
+    fetch(API+'/api/analogs?sku='+encodeURIComponent(sku))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var items=(d&&d.items)||[];
+        if(!items.length){ noData(mount,found); return; }
+        var cand=items.slice(0,FETCH);
+        var skus=[sku].concat(cand.map(function(it){ return it.sku; }));
+        return fetch(API+'/api/cards?skus='+encodeURIComponent(skus.join(',')))
+          .then(function(r){ return r.json(); })
+          .then(function(cd){
+            var cards={}; ((cd&&cd.cards)||[]).forEach(function(c){ cards[String(c.sku)]=c; });
+            var cur=cards[String(sku)];
+            var out=[];
+            cand.forEach(function(it){
+              var h=cards[String(it.sku)]; if(!h) return;
+              if(cur&&cur.category&&h.category&&h.category!==cur.category) return; // лише та сама категорія
+              if(cur&&cur.url&&h.url&&h.url===cur.url) return;                      // не сам товар
+              out.push({h:h,shared:it.shared});
+            });
+            if(!out.length){ noData(mount,found); return; }
+            out.sort(function(a,b){ return (b.h.available?1:0)-(a.h.available?1:0) || b.shared-a.shared; });
+            render(mount,out);
           });
-          if(!out.length) return;
-          // в наявності — першими; далі за кількістю спільних моделей
-          out.sort(function(a,b){ return (b.h.available?1:0)-(a.h.available?1:0) || b.shared-a.shared; });
-          render(out);
-        });
-    })
-    .catch(function(){});
+      })
+      .catch(function(){ noData(mount,found); });
+  }
+  function noData(mount,found){
+    if(found){ hideTab(found); return; }          // рідну вкладку просто ховаємо
+    mount.innerHTML='<div class="la-empty">'+T.empty+'</div>'; css();
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot();
 
@@ -79,8 +110,7 @@
     if(document.getElementById('la-css')) return;
     var st=document.createElement('style'); st.id='la-css';
     st.textContent=''
-      +'.la-block{margin:22px 0;padding:16px 0;border-top:1px solid #e6e9ee;font-family:Arial,Helvetica,sans-serif}'
-      +'.la-h{font-size:20px;margin:0 0 12px;color:#111}'
+      +'.la-wrap{font-family:Arial,Helvetica,sans-serif}'
       +'.la-card{display:flex;gap:14px;align-items:center;border:1px solid #e6e9ee;border-radius:10px;padding:12px 14px;margin:0 0 10px;background:#fff}'
       +'.la-img{width:84px;height:84px;flex:0 0 84px;object-fit:contain;border-radius:6px;background:#fafafa}'
       +'.la-ph{width:84px;height:84px;flex:0 0 84px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:#fafafa;color:#bbb}'
@@ -92,6 +122,7 @@
       +'.la-price{flex:0 0 auto;font-size:15px;font-weight:bold;color:#111;background:#f4f6f9;border-radius:8px;padding:8px 12px;white-space:nowrap}'
       +'.la-off .la-name{color:#5b6b8c}.la-off .la-img{opacity:.55}'
       +'.la-more{display:block;width:100%;border:1px solid #d5dbe4;background:#fff;border-radius:8px;padding:9px;cursor:pointer;font-size:13px;color:#16408f}'
+      +'.la-empty{font-size:13px;color:#8a94a6;padding:8px 0}'
       +'@media(max-width:520px){.la-img,.la-ph{width:64px;height:64px;flex-basis:64px}.la-price{font-size:14px;padding:6px 9px}}';
     document.head.appendChild(st);
   }
@@ -103,37 +134,20 @@
       +'<a class="la-name" href="'+esc(h.url||'#')+'">'+esc(h.name)+'</a>'+av+'</div>'
       +'<div class="la-price">'+T.price(h.price)+'</div></div>';
   }
-  function render(list){
+  function render(mount,list){
     css();
-    var sec=document.createElement('section'); sec.className='la-block';
-    var html='<h2 class="la-h">'+T.title+'</h2>';
+    var html='<div class="la-wrap">';
     list.slice(0,SHOW).forEach(function(x){ html+=card(x.h); });
     if(list.length>SHOW) html+='<button type="button" class="la-more">'+T.more+' ('+(list.length-SHOW)+')</button>';
-    sec.innerHTML=html;
-    if(!insertBlock(sec)) return;
-    var btn=sec.querySelector('.la-more');
+    html+='</div>';
+    mount.innerHTML=html;
+    var btn=mount.querySelector('.la-more');
     if(btn) btn.onclick=function(){
       var rest=''; list.slice(SHOW).forEach(function(x){ rest+=card(x.h); });
       var tmp=document.createElement('div'); tmp.innerHTML=rest;
-      while(tmp.firstChild) sec.insertBefore(tmp.firstChild,btn);
+      while(tmp.firstChild) btn.parentNode.insertBefore(tmp.firstChild,btn);
       btn.remove();
     };
-  }
-  // Ставимо блок після контейнера вкладок (той самий підхід, що в widget.js);
-  // якщо на сторінці вже є наш блок «Сумісні моделі» — одразу після нього.
-  function insertBlock(sec){
-    var lc=document.querySelector('.lartek-compat-block');
-    if(lc&&lc.parentNode){ lc.parentNode.insertBefore(sec,lc.nextSibling); return true; }
-    var W=['.product-tabs','.product__tabs','.j-product__tabs','.accordion-tabs','.product-heading','.j-product-tabs'];
-    for(var i=0;i<W.length;i++){ var w=document.querySelector(W[i]);
-      if(w&&w.parentNode){ var top=w,p=w.parentNode;
-        while(p&&p!==document.body&&/^(DIV|SECTION)$/.test(p.tagName)&&p.className&&/tabs|accordion/i.test(p.className)){ top=p; p=p.parentNode; }
-        top.parentNode.insertBefore(sec,top.nextSibling); return true; } }
-    var D=['#tab-description','.product-description','[itemprop="description"]','.product__content'];
-    for(var j=0;j<D.length;j++){ var el=document.querySelector(D[j]);
-      if(el){ var s=el.closest('section, .product__section, [data-content-id]')||el;
-        if(s.parentNode){ s.parentNode.insertBefore(sec,s.nextSibling); return true; } } }
-    return false;
   }
 })();
 </script>
