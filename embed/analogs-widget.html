@@ -102,6 +102,9 @@
   }
   function noData(mount,found){
     if(found){ hideTab(found); return; }          // рідну вкладку просто ховаємо
+    // mount вставлено вручну У ВКЛАДКУ — знайдемо її і теж сховаємо, щоб не було пустої
+    var f=findTab();
+    if(f&&f.panel&&f.panel.contains(mount)){ hideTab(f); return; }
     mount.innerHTML='<div class="la-empty">'+T.empty+'</div>'; css();
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot();
