@@ -170,7 +170,7 @@
     (function loadBrands(){
       api('/api/brands?sku='+encodeURIComponent(SKU)).then(function(d){
         var brands=d.brands||[], total=d.total|0;
-        setText(elTotal,'('+nModels(total)+')'); setText(elQcount,'('+nModels(total)+')');
+        setText(elTotal,'('+nModels(total)+')'); // лічильник лише у заголовку — біля поля пошуку дублювався (видно на мобільному)
         if(!brands.length){ setHtml(elBrand,'<option>—</option>'); setHtml(elBlist,'<div class="lcw-empty">'+T.listUpdating+'</div>'); return; }
         brands.forEach(function(b){ BRAND_COUNT[b.brand]=b.count; });
         setHtml(elBrand, brands.map(function(b){ return '<option value="'+esc(b.brand)+'">'+esc(b.brand||T.other)+' ('+b.count+')</option>'; }).join(''));
