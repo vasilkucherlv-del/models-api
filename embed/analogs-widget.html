@@ -63,13 +63,37 @@
     if(f.panel) f.panel.style.display='none';
   }
 
+  // Мобільний шаблон Horoshop НЕ рендерить кастомні вкладки (немає жодного
+  // .product-heading__tab). Тоді створюємо ВЛАСНИЙ блок «Аналоги» у стилі
+  // мобільної теми — одразу після блоку «Сумісні моделі» (або після опису).
+  // Блок вставляється лише при render(), тож без аналогів нічого не з'являється.
+  function insertOwnBlock(mount){
+    var sec=document.createElement('div'); sec.className='product__block la-block';
+    var hd=document.createElement('div'); hd.className='heading heading--l j-product-block-title';
+    hd.textContent='Аналоги';
+    var inner=document.createElement('div'); inner.appendChild(mount);
+    sec.appendChild(hd); sec.appendChild(inner);
+    var cm=document.querySelector('.lartek-compat-mount');
+    var host=cm&&cm.closest&&cm.closest('.product__block');
+    if(host&&host.parentNode){ host.parentNode.insertBefore(sec,host.nextSibling); return true; }
+    var d=document.querySelector('[itemprop="description"], .product-description');
+    var hb=d&&((d.closest&&(d.closest('.product__block')||d.closest('.product-description')))||d);
+    if(hb&&hb.parentNode){ hb.parentNode.insertBefore(sec,hb.nextSibling); return true; }
+    return false;
+  }
+  function connected(el){ return el.isConnected!==undefined?el.isConnected:document.documentElement.contains(el); }
+
   // ── запуск ──
   function boot(){
     var mount=document.querySelector('.lartek-analogs-mount'), found=null;
     if(!mount){
-      found=findTab(); if(!found) return;
-      mount=document.createElement('div');
-      found.panel.innerHTML=''; found.panel.appendChild(mount);
+      found=findTab();
+      if(found){
+        mount=document.createElement('div');
+        found.panel.innerHTML=''; found.panel.appendChild(mount);
+      } else if(!document.querySelector('.product-heading__tab, [class*="heading__tab"]')){
+        mount=document.createElement('div'); // мобільний шаблон: вставимо при render()
+      } else return;
     }
     var sku=metaSku();
     if(!sku){ if(found) hideTab(found); return; }
@@ -102,6 +126,7 @@
   }
   function noData(mount,found){
     if(found){ hideTab(found); return; }          // рідну вкладку просто ховаємо
+    if(!connected(mount)) return;                 // мобільний блок ще не вставлено — нічого не робимо
     // mount вставлено вручну У ВКЛАДКУ — знайдемо її і теж сховаємо, щоб не було пустої
     var f=findTab();
     if(f&&f.panel&&f.panel.contains(mount)){ hideTab(f); return; }
@@ -115,6 +140,7 @@
     var st=document.createElement('style'); st.id='la-css';
     st.textContent=''
       +'.la-wrap{font-family:Arial,Helvetica,sans-serif}'
+      +'.la-block{margin:18px 0}.la-block>.j-product-block-title{margin-bottom:12px}'
       +'.la-card{display:flex;gap:14px;align-items:center;border:1px solid #e6e9ee;border-radius:10px;padding:12px 14px;margin:0 0 10px;background:#fff}'
       +'.la-img{width:84px;height:84px;flex:0 0 84px;object-fit:contain;border-radius:6px;background:#fafafa}'
       +'.la-ph{width:84px;height:84px;flex:0 0 84px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:#fafafa;color:#bbb}'
@@ -139,6 +165,7 @@
       +'<div class="la-price">'+T.price(h.price)+'</div></div>';
   }
   function render(mount,list){
+    if(!connected(mount) && !insertOwnBlock(mount)) return; // мобільний шаблон без вкладок
     css();
     var html='<div class="la-wrap">';
     list.slice(0,SHOW).forEach(function(x){ html+=card(x.h); });
