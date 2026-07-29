@@ -67,11 +67,18 @@
   // .product-heading__tab). Тоді створюємо ВЛАСНИЙ блок «Аналоги» у стилі
   // мобільної теми — одразу після блоку «Сумісні моделі» (або після опису).
   // Блок вставляється лише при render(), тож без аналогів нічого не з'являється.
-  function insertOwnBlock(mount){
+  function insertOwnBlock(mount,count){
     var sec=document.createElement('div'); sec.className='product__block la-block';
-    var hd=document.createElement('div'); hd.className='heading heading--l j-product-block-title';
-    hd.textContent='Аналоги';
-    var inner=document.createElement('div'); inner.appendChild(mount);
+    var hd=document.createElement('div'); hd.className='heading heading--l j-product-block-title la-tgl';
+    hd.innerHTML='Аналоги'+(count?' ('+count+')':'')+' <span class="la-arr">▾</span>';
+    // за замовчуванням ЗГОРНУТО — розгортається тапом по заголовку
+    var inner=document.createElement('div'); inner.style.display='none';
+    inner.appendChild(mount);
+    hd.onclick=function(){
+      var open=inner.style.display!=='none';
+      inner.style.display=open?'none':'';
+      var a=hd.querySelector('.la-arr'); if(a) a.textContent=open?'▾':'▴';
+    };
     sec.appendChild(hd); sec.appendChild(inner);
     var cm=document.querySelector('.lartek-compat-mount');
     var host=cm&&cm.closest&&cm.closest('.product__block');
@@ -141,6 +148,8 @@
     st.textContent=''
       +'.la-wrap{font-family:Arial,Helvetica,sans-serif}'
       +'.la-block{margin:18px 0}.la-block>.j-product-block-title{margin-bottom:12px}'
+      +'.la-tgl{cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none}'
+      +'.la-arr{font-size:14px;color:#8a94a6}'
       +'.la-card{display:flex;gap:14px;align-items:center;border:1px solid #e6e9ee;border-radius:10px;padding:12px 14px;margin:0 0 10px;background:#fff}'
       +'.la-img{width:84px;height:84px;flex:0 0 84px;object-fit:contain;border-radius:6px;background:#fafafa}'
       +'.la-ph{width:84px;height:84px;flex:0 0 84px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:#fafafa;color:#bbb}'
@@ -165,7 +174,7 @@
       +'<div class="la-price">'+T.price(h.price)+'</div></div>';
   }
   function render(mount,list){
-    if(!connected(mount) && !insertOwnBlock(mount)) return; // мобільний шаблон без вкладок
+    if(!connected(mount) && !insertOwnBlock(mount,list.length)) return; // мобільний шаблон без вкладок
     css();
     var html='<div class="la-wrap">';
     list.slice(0,SHOW).forEach(function(x){ html+=card(x.h); });
