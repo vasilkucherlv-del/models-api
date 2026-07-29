@@ -30,8 +30,12 @@
 
   var isRu=/^\/ru(\/|$)/.test(location.pathname);
   var T=isRu
-    ? {code:'Код: ', ok:'В наличии', off:'Нет в наличии', more:'Показать ещё', empty:'Аналоги для этого товара пока не добавлены.', price:function(p){return p?fmt(p)+' грн':'цена по запросу';}}
-    : {code:'Код: ', ok:'В наявності', off:'Немає в наявності', more:'Показати ще', empty:'Аналоги для цього товару поки не додані.', price:function(p){return p?fmt(p)+' грн':'ціна за запитом';}};
+    ? {code:'Код: ', ok:'В наличии', off:'Нет в наличии', more:'Показать ещё', empty:'Аналоги для этого товара пока не добавлены.',
+       tglTitle:'Аналоги и замены', tglHint:'Похожие запчасти, которые могут подойти вместо этой', tglOpen:'посмотреть',
+       price:function(p){return p?fmt(p)+' грн':'цена по запросу';}}
+    : {code:'Код: ', ok:'В наявності', off:'Немає в наявності', more:'Показати ще', empty:'Аналоги для цього товару поки не додані.',
+       tglTitle:'Аналоги та заміни', tglHint:'Схожі запчастини, які можуть підійти замість цієї', tglOpen:'переглянути',
+       price:function(p){return p?fmt(p)+' грн':'ціна за запитом';}};
 
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function fmt(n){ return Math.round(n).toLocaleString('uk-UA'); }
@@ -67,11 +71,30 @@
   // .product-heading__tab). Тоді створюємо ВЛАСНИЙ блок «Аналоги» у стилі
   // мобільної теми — одразу після блоку «Сумісні моделі» (або після опису).
   // Блок вставляється лише при render(), тож без аналогів нічого не з'являється.
-  function insertOwnBlock(mount){
+  function insertOwnBlock(mount,list){
     var sec=document.createElement('div'); sec.className='product__block la-block';
-    var hd=document.createElement('div'); hd.className='heading heading--l j-product-block-title';
-    hd.textContent='Аналоги';
-    var inner=document.createElement('div'); inner.appendChild(mount);
+    // Заголовок-«кнопка», зрозумілий покупцю: іконка, назва з кількістю, пояснення,
+    // міні-фото товарів усередині і стрілка. За замовчуванням ЗГОРНУТО.
+    var hd=document.createElement('div'); hd.className='la-tgl';
+    var thumbs='',shown=0;
+    for(var i=0;i<list.length&&shown<3;i++){
+      var p=list[i].h&&list[i].h.picture; if(!p) continue;
+      thumbs+='<img class="la-mini" loading="lazy" src="'+thumb(p,72)+'" alt="">'; shown++;
+    }
+    var extra=list.length-shown;
+    hd.innerHTML='<span class="la-tgl-ic">&#128257;</span>'
+      +'<span class="la-tgl-mid"><span class="la-tgl-t">'+T.tglTitle+' <span class="la-cnt">'+list.length+'</span></span>'
+      +'<span class="la-tgl-h">'+T.tglHint+' — <u>'+T.tglOpen+'</u></span>'
+      +(thumbs?('<span class="la-minis">'+thumbs+(extra>0?('<span class="la-mini la-mini-more">+'+extra+'</span>'):'')+'</span>'):'')
+      +'</span><span class="la-arr">&#9662;</span>';
+    var inner=document.createElement('div'); inner.style.display='none';
+    inner.appendChild(mount);
+    hd.onclick=function(){
+      var open=inner.style.display!=='none';
+      inner.style.display=open?'none':'';
+      hd.classList.toggle('la-open',!open);
+      var a=hd.querySelector('.la-arr'); if(a) a.innerHTML=open?'&#9662;':'&#9652;';
+    };
     sec.appendChild(hd); sec.appendChild(inner);
     var cm=document.querySelector('.lartek-compat-mount');
     var host=cm&&cm.closest&&cm.closest('.product__block');
@@ -140,7 +163,21 @@
     var st=document.createElement('style'); st.id='la-css';
     st.textContent=''
       +'.la-wrap{font-family:Arial,Helvetica,sans-serif}'
-      +'.la-block{margin:18px 0}.la-block>.j-product-block-title{margin-bottom:12px}'
+      +'.la-block{margin:18px 0;font-family:Arial,Helvetica,sans-serif}'
+      +'.la-tgl{display:flex;align-items:center;gap:12px;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;'
+      +'border:1px solid #dfe3ea;border-radius:12px;padding:12px 14px;background:#fff;box-shadow:0 1px 3px rgba(15,30,60,.06)}'
+      +'.la-tgl.la-open{border-radius:12px 12px 0 0}'
+      +'.la-tgl-ic{font-size:22px;flex:0 0 auto}'
+      +'.la-tgl-mid{flex:1;min-width:0;display:block}'
+      +'.la-tgl-t{display:block;font-size:15px;font-weight:bold;color:#111}'
+      +'.la-cnt{display:inline-block;min-width:20px;text-align:center;background:#16408f;color:#fff;border-radius:10px;font-size:12px;padding:1px 7px;vertical-align:1px}'
+      +'.la-tgl-h{display:block;font-size:12px;color:#6b7686;margin-top:3px}'
+      +'.la-tgl-h u{color:#16408f}'
+      +'.la-minis{display:flex;gap:6px;margin-top:8px}'
+      +'.la-mini{width:36px;height:36px;border-radius:8px;border:1px solid #e6e9ee;background:#fafafa;object-fit:contain}'
+      +'.la-mini-more{display:flex;align-items:center;justify-content:center;font-size:12px;color:#5b6b8c;background:#eef1f6}'
+      +'.la-arr{font-size:16px;color:#8a94a6;flex:0 0 auto}'
+      +'.la-tgl+div{border:1px solid #dfe3ea;border-top:none;border-radius:0 0 12px 12px;padding:12px 12px 4px;background:#fbfcfe}'
       +'.la-card{display:flex;gap:14px;align-items:center;border:1px solid #e6e9ee;border-radius:10px;padding:12px 14px;margin:0 0 10px;background:#fff}'
       +'.la-img{width:84px;height:84px;flex:0 0 84px;object-fit:contain;border-radius:6px;background:#fafafa}'
       +'.la-ph{width:84px;height:84px;flex:0 0 84px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:#fafafa;color:#bbb}'
@@ -165,7 +202,7 @@
       +'<div class="la-price">'+T.price(h.price)+'</div></div>';
   }
   function render(mount,list){
-    if(!connected(mount) && !insertOwnBlock(mount)) return; // мобільний шаблон без вкладок
+    if(!connected(mount) && !insertOwnBlock(mount,list)) return; // мобільний шаблон без вкладок
     css();
     var html='<div class="la-wrap">';
     list.slice(0,SHOW).forEach(function(x){ html+=card(x.h); });
