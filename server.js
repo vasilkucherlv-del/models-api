@@ -405,6 +405,13 @@ app.get('/api/analogs', limiter, async (req, res) => {
        ORDER BY dir, pos`,
       [sku]
     );
+    // виключення (в обидва боки): автоматиці ці пари пропонувати заборонено
+    const exc = await pool.query(
+      `SELECT excl_sku AS sku FROM analogs_exclude WHERE sku = $1
+       UNION SELECT sku FROM analogs_exclude WHERE excl_sku = $1`,
+      [sku]
+    );
+    const excluded = new Set(exc.rows.map(r => r.sku));
     const seen = new Set([sku]);
     const items = [];
     for (const r of man.rows) {
@@ -426,7 +433,7 @@ app.get('/api/analogs', limiter, async (req, res) => {
     );
     for (const r of auto.rows) {
       if (items.length >= 30) break;
-      if (seen.has(r.sku)) continue;
+      if (seen.has(r.sku) || excluded.has(r.sku)) continue;
       seen.add(r.sku);
       items.push({ sku: r.sku, manual: false, shared: r.shared, own: r.own });
     }
@@ -450,7 +457,11 @@ app.get('/api/analogs-manual', async (req, res) => {
       'SELECT analog_sku FROM analogs_manual WHERE sku = $1 ORDER BY pos', [sku]);
     const r = await pool.query(
       'SELECT sku FROM analogs_manual WHERE analog_sku = $1 ORDER BY pos', [sku]);
-    res.json({ direct: d.rows.map(x => x.analog_sku), reverse: r.rows.map(x => x.sku) });
+    const e = await pool.query(
+      `SELECT excl_sku AS s FROM analogs_exclude WHERE sku = $1
+       UNION SELECT sku FROM analogs_exclude WHERE excl_sku = $1 ORDER BY 1`, [sku]);
+    res.json({ direct: d.rows.map(x => x.analog_sku), reverse: r.rows.map(x => x.sku),
+               exclude: e.rows.map(x => x.s) });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'server_error' });
@@ -462,12 +473,17 @@ app.post('/api/analogs-manual', async (req, res) => {
   try {
     const sku = String((req.body && req.body.sku) || '').trim();
     if (!sku) return res.status(400).json({ error: 'sku_required' });
-    const raw = Array.isArray(req.body.analogs) ? req.body.analogs : [];
-    const list = [];
-    for (const a of raw) {
-      const s = String(a || '').trim();
-      if (s && s !== sku && !list.includes(s)) list.push(s);
-    }
+    const clean = raw => {
+      const out = [];
+      for (const a of (Array.isArray(raw) ? raw : [])) {
+        const s = String(a || '').trim();
+        if (s && s !== sku && !out.includes(s)) out.push(s);
+      }
+      return out;
+    };
+    const list = clean(req.body.analogs);
+    const hasExclude = Array.isArray(req.body.exclude);
+    const excl = clean(req.body.exclude);
     await client.query('BEGIN');
     await client.query('DELETE FROM analogs_manual WHERE sku = $1', [sku]);
     for (let i = 0; i < list.length; i++) {
@@ -475,8 +491,16 @@ app.post('/api/analogs-manual', async (req, res) => {
         'INSERT INTO analogs_manual (sku, analog_sku, pos) VALUES ($1,$2,$3)',
         [sku, list[i], i]);
     }
+    if (hasExclude) { // поле передано → замінюємо і виключення (обидва напрями чистимо свої)
+      await client.query('DELETE FROM analogs_exclude WHERE sku = $1', [sku]);
+      for (const s of excl) {
+        await client.query(
+          'INSERT INTO analogs_exclude (sku, excl_sku) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+          [sku, s]);
+      }
+    }
     await client.query('COMMIT');
-    res.json({ ok: true, saved: list.length });
+    res.json({ ok: true, saved: list.length, excluded: hasExclude ? excl.length : undefined });
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
     console.error(e);
@@ -977,7 +1001,9 @@ WISL 105"></textarea>
   <div class="out" id="anCur"></div>
   <label>Ручні аналоги (через кому, в порядку показу)</label>
   <input id="anList" type="text" placeholder="напр. 0301, 0528">
-  <button id="anSave">Зберегти (замінює ручний список)</button>
+  <label>Виключити з аналогів (через кому) — автоматика більше НЕ пропонуватиме ці товари як аналоги (в обидва боки)</label>
+  <input id="anExcl" type="text" placeholder="напр. 0390 — схожий, але інший обʼєм/розмір">
+  <button id="anSave">Зберегти (замінює ручний список і виключення)</button>
   <div class="out" id="anOut"></div>
 </div>
 
@@ -1205,6 +1231,7 @@ auditGo.onclick=function(){
 var anSku=document.getElementById('anSku'),anList=document.getElementById('anList');
 var anShow=document.getElementById('anShow'),anSave=document.getElementById('anSave');
 var anCur=document.getElementById('anCur'),anOut=document.getElementById('anOut');
+var anExcl=document.getElementById('anExcl');
 anShow.onclick=function(){
   var s=anSku.value.trim();
   if(!key()||!s){show(anCur,'bad','Вкажи ключ і артикул.');return;}
@@ -1218,30 +1245,35 @@ anShow.onclick=function(){
     var auto=((a&&a.items)||[]).filter(function(x){return !x.manual;}).map(function(x){return x.sku;});
     var t='Ручні (введені тут): '+((m.direct&&m.direct.length)?m.direct.join(', '):'—')
       +'\\nРучні (прийшли з інших товарів): '+((m.reverse&&m.reverse.length)?m.reverse.join(', '):'—')
+      +'\\nВиключені (не аналоги): '+((m.exclude&&m.exclude.length)?m.exclude.join(', '):'—')
       +'\\nАвто (зі спільних моделей): '+(auto.length?auto.join(', '):'—');
     show(anCur,'ok',t);
     anList.value=(m.direct||[]).join(', ');
+    anExcl.value=(m.exclude||[]).join(', ');
   }).catch(function(e){show(anCur,'bad','Помилка: '+e.message);})
     .finally(function(){anShow.disabled=false;});
 };
 anSave.onclick=function(){
   var s=anSku.value.trim();
   if(!key()||!s){show(anOut,'bad','Вкажи ключ і артикул.');return;}
-  var list=anList.value.split(/[,;]/).map(function(x){return x.trim();}).filter(Boolean);
+  function splitIds(v){return v.split(/[,;]/).map(function(x){return x.trim();}).filter(Boolean);}
+  var list=splitIds(anList.value), excl=splitIds(anExcl.value);
   anSave.disabled=true; show(anOut,'','Зберігаю…');
-  fetch('/api/analogs-manual',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},body:JSON.stringify({sku:s,analogs:list})})
+  fetch('/api/analogs-manual',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},body:JSON.stringify({sku:s,analogs:list,exclude:excl})})
     .then(function(r){return r.json();})
     .then(function(d){
       if(!d||d.error){show(anOut,'bad','Помилка: '+((d&&d.error)||'server')+((d&&d.error)==='bad_key'?' (невірний ключ)':''));return;}
-      if(!list.length){show(anOut,'ok','Ручний список очищено.');return;}
-      fetch('/api/cards?skus='+encodeURIComponent(list.join(',')))
+      var base='Збережено: ручних '+d.saved+', виключених '+(d.excluded||0)+'.';
+      var all=list.concat(excl);
+      if(!all.length){show(anOut,'ok',base);return;}
+      fetch('/api/cards?skus='+encodeURIComponent(all.join(',')))
         .then(function(r){return r.json();})
         .then(function(cd){
           var okSkus=((cd&&cd.cards)||[]).map(function(c){return String(c.sku);});
-          var miss=list.filter(function(x){return okSkus.indexOf(x)<0;});
-          show(anOut,miss.length?'bad':'ok','Збережено: '+d.saved
+          var miss=all.filter(function(x){return okSkus.indexOf(x)<0;});
+          show(anOut,miss.length?'bad':'ok',base
             +(miss.length?('\\nУВАГА: не знайдені в каталозі (перевір артикули): '+miss.join(', ')):''));
-        }).catch(function(){show(anOut,'ok','Збережено: '+d.saved);});
+        }).catch(function(){show(anOut,'ok',base);});
     })
     .catch(function(e){show(anOut,'bad','Помилка: '+e.message);})
     .finally(function(){anSave.disabled=false;});
