@@ -184,6 +184,18 @@
     if (!c || !/^[A-Z]/.test(c)) return null;
     return s.replace(/"/g, ' ').replace(/\s+/g, ' ').trim();
   }
+  // КИРИЛИЦЯ + РОЗМІР: «сальник 25*50,55*10/12 … samsung dc62-00007a skl» дає 0,
+  // бо токен розміру живе в окремому полі dims і в парі з кирилицею Meili його
+  // не матчить (латиниця+розмір — матчить). Фолбек: прибираємо кирилицю, лишаємо
+  // розмір(и) фразою + латинські слова/коди. null — коли це не «кирилиця+розмір».
+  function qDimsLatinOf(raw){
+    var q = String(raw == null ? '' : raw).replace(/(\d)[\s\/*x×хХ·∙•⋅✕✖⨯,]+$/i, '$1');
+    var s = normDims(q).trim();
+    if (!s || !/[а-яёіїєґА-ЯЁІЇЄҐ]/.test(s) || !DIM_RE.test(s)) return null;
+    var t = s.replace(/[^\x00-\x7F]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!t || !DIM_RE.test(t)) return null;
+    return t.replace(/\d+(?:p\d+)?(?:x\d+(?:p\d+)?)+/g, '"$&"');
+  }
   // База розміру, якщо введено НЕДОДРУКОВАНИЙ останній розмір (напр. «25*47*8/1» →
   // «25*47*8»). Потрібна лише коли повний запит нічого не знайшов — тоді пропонуємо
   // товари базового розміру. null, якщо це не «розмір + недодрукований хвіст».
@@ -197,7 +209,7 @@
   // лише коли попередній дав 0 — тож точні запити не «псуються».
   function orderedQ(){
     var out=[qNorm()];
-    [qRawPhraseOf(state.q), qPlainOf(state.q)].forEach(function(x){ if(x && out.indexOf(x)<0) out.push(x); });
+    [qRawPhraseOf(state.q), qPlainOf(state.q), qDimsLatinOf(state.q)].forEach(function(x){ if(x && out.indexOf(x)<0) out.push(x); });
     return out.filter(function(x){ return x!==''; });
   }
 
