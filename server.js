@@ -1346,7 +1346,10 @@ WISL 105"></textarea>
   замінюється лише в самому кінці, однією дією: якщо зв'язок обірветься посеред процесу,
   наявні дані не постраждають.</p>
   <label>Файл резервної копії (.tsv)</label>
-  <input id="resFile" type="file" accept=".tsv,.txt,.csv,text/plain">
+  <p class="hint" style="margin:0 0 6px">Заливай файл таким, як завантажився. Дивитись його в Excel
+  можна, але <b>не перезберігай як .csv</b> — зміниться роздільник (у колонці «код» бувають коми,
+  тому копія робиться через табуляцію), і такий файл відновлення не прийме.</p>
+  <input id="resFile" type="file" accept=".tsv,.txt,text/tab-separated-values,text/plain">
   <button id="resGo">Відновити з файлу</button>
   <div class="out" id="resOut"></div>
 </div>
