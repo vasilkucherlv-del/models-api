@@ -913,12 +913,15 @@ app.post('/api/restore', async (req, res) => {
 app.post('/api/donor-probe', async (req, res) => {
   if (!hasManagerKey(req)) return res.status(401).json({ error: 'unauthorized' });
   const body = req.body || {};
-  const host = String(body.host || process.env.DONOR_HOST || '').trim();
+  const url = String(body.url || '').trim();
+  // Домен окремо не потрібен, коли товар заданий посиланням — беремо з нього.
+  const host = String(body.host || process.env.DONOR_HOST || '').trim()
+    || (/^https?:\/\//i.test(url) ? url : '');
   if (!host) return res.status(400).json({ error: 'host_required' });
   try {
     const out = await probeDonor({
       host,
-      url: String(body.url || '').trim(),
+      url,
       pid: String(body.pid || '').trim(),
       code: String(body.code || '').trim(),
       cookie: process.env.DONOR_COOKIE || '',
@@ -1078,8 +1081,9 @@ app.post('/api/match-donor', async (req, res) => {
 app.post('/api/import-donor', async (req, res) => {
   if (!hasManagerKey(req)) return res.status(401).json({ error: 'unauthorized' });
   const body = req.body || {};
-  const host = String(body.host || process.env.DONOR_HOST || '').trim();
-  if (!host) return res.status(400).json({ error: 'host_required' });
+  // Домен окремо не обов'язковий: коли товар заданий посиланням, домен береться
+  // з самого посилання. Явний host потрібен лише для рядків «артикул + голий ID/код».
+  const bodyHost = String(body.host || process.env.DONOR_HOST || '').trim();
 
   const items = Array.isArray(body.items) && body.items.length
     ? body.items
@@ -1108,6 +1112,9 @@ app.post('/api/import-donor', async (req, res) => {
   for (const job of jobs) {
     const left = deadline - Date.now();
     if (left <= 5000) { results.push({ sku: job.sku, pid: job.pid, error: 'time_budget' }); continue; }
+    // Домен цього товару: з посилання, якщо воно є; інакше — із поля/змінної.
+    const host = /^https?:\/\//i.test(job.pid) ? job.pid : bodyHost;
+    if (!host) { results.push({ sku: job.sku, pid: job.pid, error: 'host_required' }); continue; }
     try {
       // Рядок без артикулу: беремо парт-номер із назви товару донора (і зі слага адреси)
       // й шукаємо його в назвах ВЛАСНОГО фіду. Однозначний збіг → артикул визначено.
@@ -1192,7 +1199,7 @@ app.post('/api/import-donor', async (req, res) => {
   }
 
   res.json({
-    host,
+    host: bodyHost,
     ok: results.filter((r) => !r.error).length,
     processed: results.reduce((s, r) => s + (r.processed || 0), 0),
     results,
@@ -1431,8 +1438,8 @@ WISL 105"></textarea>
   Кілька посилань — пачкою. Якщо артикул не визначиться сам (парт-номера нема в назві
   твого товару) — впиши його <b>окремим рядком під посиланням</b> або в тому ж рядку.
   Спершу тисни «Лише перевірити» — покаже, що знайшлось, нічого не записуючи.</p>
-  <label>Сайт-донор</label>
-  <input id="dHost" type="text" placeholder="напр. donor.example (можна вставити будь-яке посилання з нього)">
+  <label>Сайт-донор (необов'язково — береться з посилань; потрібен лише для автопошуку за кодом)</label>
+  <input id="dHost" type="text" placeholder="залиш порожнім, якщо вставляєш посилання">
 
   <p class="hint" style="margin-top:14px"><b>Почни звідси.</b> Перевірка зв'язку: бере одну сторінку
   товару донора й показує, чи читаються бренди та моделі, чи потрібен логін і який шлях пошуку
@@ -1707,8 +1714,7 @@ function donorItems(){
 }
 function donorRun(dry){
   if(!key()){alert('Введи ключ');return;}
-  var host=document.getElementById('dHost').value.trim();
-  if(!host){alert('Впиши домен сайту-донора');return;}
+  var host=document.getElementById('dHost').value.trim();   // необов'язково: домен береться з посилань
   var p=donorItems();
   if(p.bad.length){alert('Не зрозумів рядок (встав посилання на товар донора; або «артикул посилання/ID»):\\n'+p.bad[0]);return;}
   if(!p.items.length){alert('Встав хоч одне посилання на товар донора у поле «Товари»');return;}
@@ -1839,8 +1845,8 @@ pbGo.onclick=function(){
   var host=document.getElementById('dHost').value.trim();
   var url=document.getElementById('pbUrl').value.trim();
   var code=document.getElementById('pbCode').value.trim();
-  if(!host){alert('Впиши домен сайту-донора');return;}
   if(!url){alert('Встав посилання на будь-який товар донора (або його числовий ID)');return;}
+  if(!host&&!/^https?:\\/\\//i.test(url)){alert('Для числового ID впиши домен у поле «Сайт-донор» (з посилання домен береться сам)');return;}
   pbGo.disabled=true; pbSteps.innerHTML=''; show(pbOut,'','Перевіряю донора…');
   fetch('/api/donor-probe',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},
     body:JSON.stringify({host:host,url:/^\\d+$/.test(url)?'':url,pid:/^\\d+$/.test(url)?url:'',code:code})})
@@ -1890,7 +1896,7 @@ function mdRender(rows){
 function mdRun(body){
   if(!key()){alert('Введи ключ');return;}
   var host=document.getElementById('dHost').value.trim();
-  if(!host){alert('Впиши домен сайту-донора');return;}
+  if(!host){alert('Для автопошуку впиши сайт-донор угорі розділу (кодам нема з чого взяти домен) — або задай змінну DONOR_HOST');return;}
   mdGo.disabled=true;mdMissing.disabled=true;mdTable.innerHTML='';mdImport.style.display='none';
   show(mdOut,'','Шукаю на донорі… Це може тривати кілька хвилин — не закривай сторінку.');
   fetch('/api/match-donor',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},
