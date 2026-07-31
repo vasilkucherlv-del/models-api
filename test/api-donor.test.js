@@ -166,6 +166,17 @@ const api = async (p, body) => {
   assert.ok(nm.title.includes('Клапан Samsung'), 'у відповіді є назва — щоб було видно, що це за товар');
   assert.ok(!written.length, 'нічого не записано');
 
+  // ── домен окремо не потрібен: без host у тілі й без DONOR_HOST посилання працює ──
+  const savedHost = process.env.DONOR_HOST;
+  delete process.env.DONOR_HOST;
+  const noHost = await api('/api/import-donor', { items: [{ sku: '0873', pid: 'https://donor.example/ua/nasos-00144978/' }], dryRun: true });
+  assert.strictEqual(noHost.status, 200);
+  assert.strictEqual(noHost.body.results[0].models, 3, 'домен взявся з самого посилання');
+  // а голий ID без домену — зрозуміла відмова саме цього рядка
+  const noHostБareId = await api('/api/import-donor', { items: [{ sku: '0873', pid: '501' }], dryRun: true });
+  assert.strictEqual(noHostБareId.body.results[0].error, 'host_required');
+  process.env.DONOR_HOST = savedHost;
+
   // ── без артикулу і без посилання (голий ID) — відмова одразу ──
   const bareId = await api('/api/import-donor', { items: [{ pid: '501' }] });
   assert.strictEqual(bareId.status, 400);
