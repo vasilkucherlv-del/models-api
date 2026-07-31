@@ -20,6 +20,47 @@ const DEFAULT_PATHS = [
   '/search?q={q}',
 ];
 
+// Адреса пошуку донора — з його ж форми пошуку на головній сторінці.
+// Кожен сайт має <form action="…"><input name="…">, тож шаблон можна не вгадувати.
+// Повертає напр. '/ua/search?query={q}' або null, якщо форми не видно.
+function searchPathFromHtml(html, lang) {
+  const forms = String(html || '').match(/<form\b[\s\S]{0,2000}?<\/form>/gi) || [];
+  const NAME = /^(q|s|query|search|keyword|keywords|text|term|searchstring)$/i;
+  for (const f of forms) {
+    const inputs = f.match(/<input\b[^>]*>/gi) || [];
+    let field = null;
+    for (const i of inputs) {
+      const n = (i.match(/\bname=["']([^"']+)["']/i) || [])[1];
+      if (!n) continue;
+      const type = (i.match(/\btype=["']([^"']+)["']/i) || [])[1] || 'text';
+      if (/^(hidden|submit|button|checkbox|radio)$/i.test(type)) continue;
+      if (NAME.test(n) || /search/i.test(n)) { field = n; break; }
+    }
+    if (!field) continue;
+    let action = (f.match(/<form\b[^>]*\baction=["']([^"']*)["']/i) || [])[1] || '';
+    if (/^https?:\/\//i.test(action)) { try { action = new URL(action).pathname; } catch (e) { continue; } }
+    if (!action) action = '/' + lang + '/search';
+    if (!action.startsWith('/')) action = '/' + action;
+    return action + (action.includes('?') ? '&' : '?') + field + '={q}';
+  }
+  return null;
+}
+
+async function discoverSearchPath(options) {
+  const o = options || {};
+  const host = parseHost(o.host);
+  const lang = o.lang || 'ua';
+  for (const page of ['https://' + host + '/' + lang + '/', 'https://' + host + '/']) {
+    try {
+      const got = await fetchAny(page, o);
+      if (!got.html) continue;
+      const tpl = searchPathFromHtml(got.html, lang);
+      if (tpl) return tpl;
+    } catch (e) { /* пробуємо наступну сторінку */ }
+  }
+  return null;
+}
+
 async function fetchAny(url, opts) {
   const headers = {
     'User-Agent': opts.userAgent || UA,
@@ -104,7 +145,13 @@ async function searchDonor(options) {
   const code = String(o.code || '').trim();
   if (!code) throw new Error('code_required');
   const lang = o.lang || 'ua';
-  const paths = (o.searchPath ? [o.searchPath] : (process.env.DONOR_SEARCH_PATH ? [process.env.DONOR_SEARCH_PATH] : DEFAULT_PATHS));
+  let paths = (o.searchPath ? [o.searchPath] : (process.env.DONOR_SEARCH_PATH ? [process.env.DONOR_SEARCH_PATH] : null));
+  if (!paths) {
+    // Шаблон не заданий — спершу питаємо в самого сайту (його форма пошуку),
+    // і лише потім перебираємо типові варіанти.
+    const found = await discoverSearchPath(o);
+    paths = found ? [found].concat(DEFAULT_PATHS.filter((p) => p !== found)) : DEFAULT_PATHS;
+  }
 
   let lastErr = null;
   for (const tpl of paths) {
@@ -155,4 +202,7 @@ async function matchDonorProduct(options) {
   return { confidence: 'none', reason: 'not_found', code: codes[0] };
 }
 
-module.exports = { searchDonor, matchDonorProduct, itemsFromJson, itemsFromHtml, confidenceOf, DEFAULT_PATHS };
+module.exports = {
+  searchDonor, matchDonorProduct, itemsFromJson, itemsFromHtml, confidenceOf,
+  discoverSearchPath, searchPathFromHtml, DEFAULT_PATHS,
+};

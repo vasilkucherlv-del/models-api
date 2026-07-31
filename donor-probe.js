@@ -8,7 +8,7 @@
 // Нічого не пише в базу і не обходить усі бренди: один товар, один бренд, кілька шаблонів пошуку.
 
 const { parseHost, resolvePid, findBrands, findModels } = require('./donor');
-const { DEFAULT_PATHS, itemsFromJson, itemsFromHtml } = require('./donor-search');
+const { DEFAULT_PATHS, itemsFromJson, itemsFromHtml, discoverSearchPath } = require('./donor-search');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const SNIPPET = 600;
@@ -80,20 +80,28 @@ async function probeDonor(options) {
     if (!page) throw new Error('pid_or_url_required');
     const res = await probeFetch(page, o);
     const read = readResponse(res);
-    const hit = res.text.match(/compatibility\/(\d+)/);
-    if (hit) pid = hit[1];
-    steps.push({
-      step: 'page', title: 'Сторінка товару', url: page, status: res.status,
-      contentType: res.contentType, ok: !!hit && !read.bad,
-      found: hit ? ('ID товару: ' + hit[1]) : 'ID у HTML не знайдено',
-      snippet: hit ? '' : res.snippet, error: res.error || '',
-    });
     if (read.needCookie) needCookie = true;
     if (read.rateLimited) rateLimited = true;
-    if (!hit) {
+
+    let how = '';
+    const hit = res.text.match(/compatibility\/(\d+)/);
+    if (hit) { pid = hit[1]; how = 'зі сліду «compatibility/<ID>» у HTML'; }
+    else if (!read.bad) {
+      // ID підвантажується скриптом — просимо resolvePid перебрати кандидатів
+      // і залишити той, що реально віддає бренди.
+      try { pid = await resolvePid(page, o); how = 'перебором чисел зі сторінки (перевірено на API)'; }
+      catch (e) { pid = ''; how = e.tried && e.tried.length ? ('перебрано без успіху: ' + e.tried.join(', ')) : ''; }
+    }
+    steps.push({
+      step: 'page', title: 'Сторінка товару', url: page, status: res.status,
+      contentType: res.contentType, ok: !!pid,
+      found: pid ? ('ID товару: ' + pid + ' — ' + how) : ('ID не знайдено' + (how ? ' (' + how + ')' : '')),
+      snippet: pid ? '' : res.snippet, error: res.error || '',
+    });
+    if (!pid) {
       verdict.push(read.bad
         ? '✖ Сторінка товару не віддалась: ' + read.why
-        : '✖ На сторінці товару немає «compatibility/<ID>» — або це не сторінка товару, або ID вантажиться інакше. Візьми ID із DevTools (вкладка Network, запит до /api/models/compatibility/…) і встав його замість посилання.');
+        : '✖ ID товару зі сторінки визначити не вдалось. Візьми його з імені файлу, який завантажує закладка (models_<ID>.xls), і встав замість посилання.');
       return { host, pid: '', steps, verdict, needCookie, rateLimited };
     }
   }
@@ -139,7 +147,18 @@ async function probeDonor(options) {
   // Крок 4 — пошук за кодом (потрібен лише для автопошуку; на збір за посиланням не впливає).
   const code = String(o.code || '').trim();
   if (code) {
-    const paths = o.searchPath ? [o.searchPath] : (process.env.DONOR_SEARCH_PATH ? [process.env.DONOR_SEARCH_PATH] : DEFAULT_PATHS);
+    let paths = o.searchPath ? [o.searchPath] : (process.env.DONOR_SEARCH_PATH ? [process.env.DONOR_SEARCH_PATH] : null);
+    if (!paths) {
+      // Питаємо адресу пошуку в самого сайту — з його форми пошуку.
+      const found = await discoverSearchPath(o);
+      if (found) {
+        steps.push({
+          step: 'search-form', title: 'Форма пошуку на сайті донора', url: 'https://' + host + '/' + lang + '/',
+          status: 200, contentType: '', ok: true, found: 'знайдено адресу пошуку: ' + found, snippet: '', error: '',
+        });
+      }
+      paths = found ? [found].concat(DEFAULT_PATHS.filter((p) => p !== found)) : DEFAULT_PATHS;
+    }
     let hitPath = null;
     for (const tpl of paths) {
       const url = 'https://' + host + tpl.replace('{lang}', lang).replace('{q}', encodeURIComponent(code));
