@@ -1428,8 +1428,8 @@ WISL 105"></textarea>
   <h2>1в) Забрати моделі зі сторінки донора</h2>
   <p class="hint">Замість закладки в браузері: <b>просто встав посилання на товар донора</b> —
   сервер сам визначить твій артикул за парт-номером у назві, обійде всі бренди й збере моделі.
-  Один рядок = один товар, кілька рядків — пачкою. Якщо артикул не визначиться (парт-номера
-  нема в назві твого товару) — допиши його перед посиланням: «0873 посилання».
+  Кілька посилань — пачкою. Якщо артикул не визначиться сам (парт-номера нема в назві
+  твого товару) — впиши його <b>окремим рядком під посиланням</b> або в тому ж рядку.
   Спершу тисни «Лише перевірити» — покаже, що знайшлось, нічого не записуючи.</p>
   <label>Сайт-донор</label>
   <input id="dHost" type="text" placeholder="напр. donor.example (можна вставити будь-яке посилання з нього)">
@@ -1448,6 +1448,7 @@ WISL 105"></textarea>
   <hr style="border:0;border-top:1px solid #eef1f4;margin:20px 0">
   <label>Товари (посилання на товар донора, по одному в рядку)</label>
   <textarea id="dList" placeholder="https://donor.example/ua/product-name
+0873
 https://donor.example/ua/inshyi-tovar"></textarea>
   <div class="row"><input id="dReplace" type="checkbox" checked><label style="margin:0;font-weight:400">Замінити наявні моделі цих товарів</label></div>
   <button id="dTest" style="background:#57606a">Лише перевірити</button>
@@ -1685,13 +1686,21 @@ function donorItems(){
     var l=lines[i].trim();
     if(!l||l.charAt(0)==='#') continue;
     var parts=l.split(/[\\t;,]|\\s+/).map(function(s){return s.trim();}).filter(Boolean);
+    var isUrl=function(s){return /^https?:\\/\\//i.test(s);};
     if(parts.length===1){
-      // самé посилання — артикул сервер визначить за парт-номером зі сторінки.
-      // Голий ID без артикулу не приймаємо: у числа немає сторінки з назвою.
-      if(/^https?:\\/\\//i.test(parts[0])) items.push({pid:parts[0]});
-      else bad.push(l);
+      if(isUrl(parts[0])){
+        // самé посилання — артикул або визначиться за парт-номером, або буде в наступному рядку
+        items.push({pid:parts[0]});
+      }else if(items.length&&!items[items.length-1].sku){
+        // окремий рядок з артикулом — належить посиланню рядком вище
+        items[items.length-1].sku=parts[0];
+      }else{
+        bad.push(l);
+      }
     }else{
-      items.push({sku:parts[0],pid:parts[1]});
+      // «артикул посилання» або «посилання артикул» — порядок не важливий
+      if(isUrl(parts[0])&&!isUrl(parts[1])) items.push({sku:parts[1],pid:parts[0]});
+      else items.push({sku:parts[0],pid:parts[1]});
     }
   }
   return {items:items,bad:bad};
