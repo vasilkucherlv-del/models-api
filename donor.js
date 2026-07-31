@@ -91,22 +91,34 @@ function findModels(x) {
 
 const clean = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
 
-// ID товару на донорі. Приймає число, повний URL сторінки товару або URL API.
-// Для сторінки товару — тягне HTML і шукає в ньому «compatibility/<id>»
-// (той самий слід, який закладка знаходила серед мережевих запитів).
-async function resolvePid(input, opts) {
+// Назва товару зі сторінки донора — з неї потім витягується парт-номер,
+// за яким визначається ВЛАСНИЙ артикул (щоб не вписувати його руками).
+function pageTitle(html) {
+  const og = html.match(/property=["']og:title["'][^>]*content=["']([^"']+)["']/i)
+          || html.match(/content=["']([^"']+)["'][^>]*property=["']og:title["']/i);
+  const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+  const t = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const raw = (og && og[1]) || (h1 && h1[1]) || (t && t[1]) || '';
+  return clean(raw.replace(/<[^>]*>/g, ' ').replace(/&[a-z]+;|&#\d+;/gi, ' '));
+}
+
+// Товар на донорі за числом, посиланням на API чи сторінкою товару.
+// Повертає { pid, title, url }: pid — для API сумісності, title — для
+// визначення власного артикулу за парт-номером.
+async function resolveProduct(input, opts) {
   const raw = String(input || '').trim();
   if (!raw) throw new Error('pid_required');
-  if (/^\d+$/.test(raw)) return raw;
+  if (/^\d+$/.test(raw)) return { pid: raw, title: '', url: '' };
 
   const m = raw.match(/compatibility\/(\d+)/);
-  if (m) return m[1];
+  if (m) return { pid: m[1], title: '', url: raw };
 
   if (!/^https?:\/\//i.test(raw)) throw new Error('bad_pid');
   const o = opts || {};
   const html = await getText(raw, o);
+  const title = pageTitle(html);
   const hit = html.match(/compatibility\/(\d+)/);
-  if (hit) return hit[1];
+  if (hit) return { pid: hit[1], title, url: raw };
 
   // Сліду «compatibility/<ID>» у HTML немає — отже блок сумісності підвантажується
   // скриптом. Тоді збираємо з коду сторінки всі числа, схожі на ID товару, і просто
@@ -121,13 +133,17 @@ async function resolvePid(input, opts) {
     try {
       const data = await getJson(`https://${host}/${lang}/api/models/compatibility/${id}`, o);
       const brands = findBrands(data);
-      if (brands && brands.length) return id;
+      if (brands && brands.length) return { pid: id, title, url: raw };
     } catch (e) { /* не той ID — пробуємо наступний */ }
     await sleep(o.delayMs != null ? o.delayMs : DEFAULTS.delayMs);
   }
   const err = new Error('pid_not_found');
   err.tried = tried;
   throw err;
+}
+
+async function resolvePid(input, opts) {
+  return (await resolveProduct(input, opts)).pid;
 }
 
 // Числа зі сторінки, схожі на ID товару, від найімовірнішого до найменш імовірного.
@@ -214,4 +230,4 @@ async function collectDonorModels(options) {
   return { host, pid, brands: brands.length, models, failed, stopped };
 }
 
-module.exports = { collectDonorModels, resolvePid, idCandidates, parseHost, findBrands, findModels, DEFAULTS };
+module.exports = { collectDonorModels, resolvePid, resolveProduct, idCandidates, parseHost, findBrands, findModels, DEFAULTS };
