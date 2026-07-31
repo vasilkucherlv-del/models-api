@@ -8,9 +8,9 @@ const XLSX = require('xlsx');
 const { pool, norm, init } = require('./db');
 const { parseFeed } = require('./import-feed');
 const { parseTables } = require('./table-parser');
-const { collectDonorModels } = require('./donor');
+const { collectDonorModels, resolveProduct } = require('./donor');
 const { matchDonorProduct } = require('./donor-search');
-const { codesFromName } = require('./donor-code');
+const { codesFromName, isCandidate } = require('./donor-code');
 const { probeDonor } = require('./donor-probe');
 
 const PORT = process.env.PORT || 3000;
@@ -956,6 +956,44 @@ async function feedIndex() {
   return byS;
 }
 
+// Зворотний індекс фіду: нормалізований парт-номер → артикули, у назвах яких він є.
+// Потрібен, щоб за посиланням на товар донора визначати ВЛАСНИЙ артикул автоматично.
+async function feedCodeIndex() {
+  const byS = await feedIndex();
+  if (feedCache.codeIdx && feedCache.codeIdxOf === byS) return feedCache.codeIdx;
+  const idx = new Map();
+  for (const [sku, f] of byS) {
+    for (const c of codesFromName(f.name, f.vendor)) {
+      const cn = norm(c);
+      if (cn.length < 5) continue;               // закороткі коди дають випадкові збіги
+      if (!idx.has(cn)) idx.set(cn, new Set());
+      idx.get(cn).add(sku);
+    }
+  }
+  feedCache.codeIdx = idx;
+  feedCache.codeIdxOf = byS;
+  return idx;
+}
+
+// Парт-номери зі сторінки донора: з назви товару і з самої адреси (слаг часто
+// закінчується кодом: …-braun-67050144). Повертає нормалізовані, без дублів.
+function donorPageCodes(title, url) {
+  const out = [];
+  const seen = new Set();
+  const add = (tok) => {
+    const cn = norm(tok);
+    if (cn.length < 5 || seen.has(cn)) return;
+    seen.add(cn);
+    out.push(cn);
+  };
+  codesFromName(title, '').forEach(add);
+  try {
+    const slug = decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() || '');
+    slug.split(/[-_]/).filter((t) => isCandidate(t)).forEach(add);
+  } catch (e) { /* не URL — нічого страшного */ }
+  return out;
+}
+
 // POST /api/match-donor   headers: X-Import-Key
 // body: { host?, skus:["0873",…] }              — звірити конкретні артикули
 //    або { host?, items:[{sku,code|name}] }     — свої коди/назви, без фіду
@@ -1059,7 +1097,11 @@ app.post('/api/import-donor', async (req, res) => {
   const dryRun = body.dryRun === true;
   const replace = body.replace === true;
   const allowWeak = body.allowWeak === true;
-  if (!dryRun && jobs.some((j) => !j.sku)) return res.status(400).json({ error: 'sku_required' });
+  // Артикул обов'язковий лише там, де його нема звідки взяти. Рядок із посиланням
+  // може йти БЕЗ артикулу — він визначиться за парт-номером зі сторінки донора.
+  if (jobs.some((j) => !j.sku && !/^https?:\/\//i.test(j.pid))) {
+    return res.status(400).json({ error: 'sku_required' });
+  }
 
   const deadline = Date.now() + DONOR_BUDGET_MS;
   const results = [];
@@ -1067,6 +1109,33 @@ app.post('/api/import-donor', async (req, res) => {
     const left = deadline - Date.now();
     if (left <= 5000) { results.push({ sku: job.sku, pid: job.pid, error: 'time_budget' }); continue; }
     try {
+      // Рядок без артикулу: беремо парт-номер із назви товару донора (і зі слага адреси)
+      // й шукаємо його в назвах ВЛАСНОГО фіду. Однозначний збіг → артикул визначено.
+      if (!job.sku) {
+        const info = await resolveProduct(job.pid, {
+          cookie: process.env.DONOR_COOKIE || '', lang: process.env.DONOR_LANG || 'ua',
+          delayMs: DONOR_DELAY_MS,
+        });
+        const codes = donorPageCodes(info.title, job.pid);
+        const idx = await feedCodeIndex();
+        let matched = null, seenSkus = new Set();
+        for (const cn of codes) {
+          const skus = idx.get(cn);
+          if (!skus) continue;
+          skus.forEach((s) => seenSkus.add(s));
+          if (skus.size === 1 && !matched) matched = { sku: [...skus][0], code: cn };
+        }
+        if (!matched) {
+          results.push({
+            pid: info.pid, url: job.pid, title: info.title, error: 'sku_not_found',
+            codes: codes.slice(0, 6), matches: [...seenSkus].slice(0, 6),
+          });
+          continue;
+        }
+        job.sku = matched.sku;
+        job.pid = info.pid;
+        job.autoSku = { code: matched.code, title: info.title };
+      }
       // Задано лише код — спершу знаходимо товар на донорі. Слабкий збіг у базу не пускаємо:
       // це саме той випадок, коли автопошук може підсунути схожу, але іншу деталь.
       if (!job.pid) {
@@ -1097,6 +1166,7 @@ app.post('/api/import-donor', async (req, res) => {
         failed: got.failed, stopped: got.stopped,
       };
       if (job.matched) base.matched = job.matched;
+      if (job.autoSku) base.autoSku = job.autoSku;
       // Перевірка без запису віддає ВЕСЬ список — щоб адмінка могла вивантажити .tsv
       // і його можна було звірити з файлом, який давала закладка, порівнянням файлів.
       if (dryRun) { results.push(Object.assign({ dryRun: true, sample: got.models.slice(0, DONOR_DRY_CAP) }, base)); continue; }
@@ -1356,10 +1426,11 @@ WISL 105"></textarea>
 
 <div class="card">
   <h2>1в) Забрати моделі зі сторінки донора</h2>
-  <p class="hint">Замість закладки в браузері: сервер сам обходить усі бренди товару на
-  сайті-донорі й складає список. Один рядок = один товар: <b>твій артикул</b>, далі
-  посилання на сторінку донора (або числовий ID). Кілька рядків — пачкою.
-  Спершу тисни «Лише перевірити» — покаже, скільки моделей знайшлось, нічого не записуючи.</p>
+  <p class="hint">Замість закладки в браузері: <b>просто встав посилання на товар донора</b> —
+  сервер сам визначить твій артикул за парт-номером у назві, обійде всі бренди й збере моделі.
+  Один рядок = один товар, кілька рядків — пачкою. Якщо артикул не визначиться (парт-номера
+  нема в назві твого товару) — допиши його перед посиланням: «0873 посилання».
+  Спершу тисни «Лише перевірити» — покаже, що знайшлось, нічого не записуючи.</p>
   <label>Сайт-донор</label>
   <input id="dHost" type="text" placeholder="напр. donor.example (можна вставити будь-яке посилання з нього)">
 
@@ -1375,9 +1446,9 @@ WISL 105"></textarea>
   <div id="pbSteps"></div>
 
   <hr style="border:0;border-top:1px solid #eef1f4;margin:20px 0">
-  <label>Товари (артикул + посилання або ID, по одному в рядку)</label>
-  <textarea id="dList" placeholder="0873	https://donor.example/ua/product-name
-237	48219"></textarea>
+  <label>Товари (посилання на товар донора, по одному в рядку)</label>
+  <textarea id="dList" placeholder="https://donor.example/ua/product-name
+https://donor.example/ua/inshyi-tovar"></textarea>
   <div class="row"><input id="dReplace" type="checkbox" checked><label style="margin:0;font-weight:400">Замінити наявні моделі цих товарів</label></div>
   <button id="dTest" style="background:#57606a">Лише перевірити</button>
   <button id="dGo">Забрати і залити</button>
@@ -1614,8 +1685,14 @@ function donorItems(){
     var l=lines[i].trim();
     if(!l||l.charAt(0)==='#') continue;
     var parts=l.split(/[\\t;,]|\\s+/).map(function(s){return s.trim();}).filter(Boolean);
-    if(parts.length<2){bad.push(l);continue;}
-    items.push({sku:parts[0],pid:parts[1]});
+    if(parts.length===1){
+      // самé посилання — артикул сервер визначить за парт-номером зі сторінки.
+      // Голий ID без артикулу не приймаємо: у числа немає сторінки з назвою.
+      if(/^https?:\\/\\//i.test(parts[0])) items.push({pid:parts[0]});
+      else bad.push(l);
+    }else{
+      items.push({sku:parts[0],pid:parts[1]});
+    }
   }
   return {items:items,bad:bad};
 }
@@ -1624,8 +1701,8 @@ function donorRun(dry){
   var host=document.getElementById('dHost').value.trim();
   if(!host){alert('Впиши домен сайту-донора');return;}
   var p=donorItems();
-  if(p.bad.length){alert('Не зрозумів рядок (потрібно «артикул» і посилання/ID):\\n'+p.bad[0]);return;}
-  if(!p.items.length){alert('Додай хоч один рядок «артикул + посилання або ID»');return;}
+  if(p.bad.length){alert('Не зрозумів рядок (встав посилання на товар донора; або «артикул посилання/ID»):\\n'+p.bad[0]);return;}
+  if(!p.items.length){alert('Встав хоч одне посилання на товар донора у поле «Товари»');return;}
   var replace=document.getElementById('dReplace').checked;
   dGo.disabled=true; dTest.disabled=true;
   show(dOut,'',(dry?'Перевіряю':'Збираю')+' на донорі… Товарів: '+p.items.length+'. Це може тривати кілька хвилин — не закривай сторінку.');
@@ -1636,9 +1713,15 @@ function donorRun(dry){
       if(!x.ok){show(dOut,'bad','Помилка: '+((x.d&&x.d.error)||'невідома')+(x.d&&x.d.error==='unauthorized'?' (невірний ключ)':''));return;}
       var rows=(x.d&&x.d.results)||[];
       var txt=rows.map(function(r){
+        if(r.error==='sku_not_found'){
+          return '✖ '+(r.title||r.url||r.pid)+'\\n   не впізнав, який це твій товар'
+            +(r.matches&&r.matches.length?' (схожі артикули: '+r.matches.join(', ')+')':'')
+            +' — допиши артикул перед посиланням і повтори';
+        }
         var head=(r.sku||'—')+' ← '+r.pid+': ';
         if(r.error) return head+'✖ '+r.error;
         var s=r.models+' моделей із '+r.brands+' брендів';
+        if(r.autoSku) s+=' (артикул '+r.sku+' визначено за кодом '+r.autoSku.code+')';
         if(!dry) s+=' → у базу '+r.processed;
         if(r.failed&&r.failed.length) s+=' (не віддали: '+r.failed.join(', ')+')';
         if(r.stopped) s+=' (обірвано за лімітом часу — запусти рештою пачки)';

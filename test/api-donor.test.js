@@ -60,7 +60,8 @@ globalThis.fetch = async (url, opt) => {
       if (q === '00491669') return json({ items: [{ id: 6, name: 'Фільтр для пилососа Bosch', url: '/ua/filtr-x/' }] });  // код не видно → weak
       return json({ items: [] });
     }
-    if (u.pathname === '/ua/nasos-00144978/') return html('<a href="/ua/api/models/compatibility/501">сумісність</a>');
+    if (u.pathname === '/ua/nasos-00144978/') return html('<title>Насос для пральної машини Bosch 00144978 — купити</title><a href="/ua/api/models/compatibility/501">сумісність</a>');
+    if (u.pathname === '/ua/nevidomyi-tovar/') return html('<title>Клапан Samsung DC97-99999X</title><a href="/ua/api/models/compatibility/909">сумісність</a>');
     if (u.pathname === '/ua/filtr-x/') return html('<a href="/ua/api/models/compatibility/502">сумісність</a>');
     if (u.pathname.startsWith('/ua/api/models/compatibility/')) {
       const bid = u.searchParams.get('brand_id');
@@ -147,6 +148,28 @@ const api = async (p, body) => {
   assert.strictEqual(r1.error, 'no_match', 'слабкий збіг без підтвердження в базу не йде');
   assert.strictEqual(r1.confidence, 'weak');
   assert.ok(!written.some((r) => r.sku === '0311'), 'для слабкого збігу нічого не записано');
+
+  // ── самé посилання, БЕЗ артикулу: артикул визначається за парт-номером ──
+  written.length = 0;
+  const byLink = await api('/api/import-donor', { items: [{ pid: 'https://donor.example/ua/nasos-00144978/' }], dryRun: true });
+  assert.strictEqual(byLink.status, 200);
+  const bl = byLink.body.results[0];
+  assert.strictEqual(bl.sku, '0873', 'артикул знайдено у фіді за кодом 00144978 з назви донора');
+  assert.strictEqual(bl.autoSku.code, '00144978');
+  assert.strictEqual(bl.pid, '501');
+  assert.strictEqual(bl.models, 3);
+
+  // ── посилання на товар, якого нема у фіді → зрозуміла відмова, а не запис абикуди ──
+  const noMatch = await api('/api/import-donor', { items: [{ pid: 'https://donor.example/ua/nevidomyi-tovar/' }], dryRun: true });
+  const nm = noMatch.body.results[0];
+  assert.strictEqual(nm.error, 'sku_not_found');
+  assert.ok(nm.title.includes('Клапан Samsung'), 'у відповіді є назва — щоб було видно, що це за товар');
+  assert.ok(!written.length, 'нічого не записано');
+
+  // ── без артикулу і без посилання (голий ID) — відмова одразу ──
+  const bareId = await api('/api/import-donor', { items: [{ pid: '501' }] });
+  assert.strictEqual(bareId.status, 400);
+  assert.strictEqual(bareId.body.error, 'sku_required');
 
   // ── слабкий збіг проходить лише з явним дозволом ──
   const weakOk = await api('/api/import-donor', { items: [{ sku: '0311', code: '00491669' }], allowWeak: true });
