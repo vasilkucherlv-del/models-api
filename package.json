@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "import": "node import-csv.js",
-    "test": "node test/donor-code.test.js && node test/donor.test.js && node test/donor-search.test.js && node test/donor-probe.test.js && node test/api-donor.test.js"
+    "test": "node test/donor-code.test.js && node test/donor.test.js && node test/donor-search.test.js && node test/donor-probe.test.js && node test/api-donor.test.js && node test/api-backup.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

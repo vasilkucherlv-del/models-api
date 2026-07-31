@@ -798,6 +798,113 @@ const DONOR_DELAY_MS = parseInt(process.env.DONOR_DELAY_MS || '900', 10);
 const DONOR_BUDGET_MS = parseInt(process.env.DONOR_BUDGET_MS || '210000', 10);
 const DONOR_DRY_CAP = parseInt(process.env.DONOR_DRY_CAP || '5000', 10);   // стеля списку в режимі перевірки
 
+// === Резервна копія бази моделей ===
+// GET /api/backup   headers: X-Import-Key (лише головний ключ)
+// Віддає ВСЮ таблицю сумісності як .tsv: sku, brand, model, code — тобто рівно те,
+// з чого її можна відновити один-в-один. (/api/export для цього не годиться: він
+// призначений для пошуку й навмисно втрачає бренд та змішує коди з моделями.)
+// Читаємо сторінками, щоб велика база не з'їла пам'ять сервера.
+const BACKUP_PAGE = 5000;
+const tsvCell = (v) => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ').trim();
+
+app.get('/api/backup', async (req, res) => {
+  if (!hasFullKey(req)) return res.status(401).json({ error: 'unauthorized' });
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Type', 'text/tab-separated-values; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="compatibility-backup-' + stamp + '.tsv"');
+  res.write('﻿' + ['sku', 'brand', 'model', 'code'].join('\t') + '\r\n');
+  try {
+    let offset = 0, total = 0;
+    for (;;) {
+      const { rows } = await pool.query(
+        'SELECT sku, brand, model, code FROM compatibility ORDER BY id LIMIT $1 OFFSET $2',
+        [BACKUP_PAGE, offset]
+      );
+      if (!rows.length) break;
+      res.write(rows.map((r) => [tsvCell(r.sku), tsvCell(r.brand), tsvCell(r.model), tsvCell(r.code)].join('\t')).join('\r\n') + '\r\n');
+      total += rows.length;
+      if (rows.length < BACKUP_PAGE) break;
+      offset += BACKUP_PAGE;
+    }
+    console.log('backup: віддано рядків', total);
+    res.end();
+  } catch (e) {
+    console.error('backup', e.message);
+    // Заголовки вже пішли — обриваємо потік, щоб недокачаний файл не виглядав цілим.
+    res.destroy(e);
+  }
+});
+
+// POST /api/restore   headers: X-Import-Key (лише головний ключ)
+// Відновлення з файлу резервної копії. Іде трьома кроками, щоб великий файл
+// не впирався в обмеження розміру запиту, і щоб обірваний посеред дороги залив
+// НЕ зіпсував робочу таблицю:
+//   { start:true }            — приготувати проміжну таблицю
+//   { rows:[[sku,brand,model,code],…] } — залити чергову порцію в проміжну
+//   { commit:true }           — однією транзакцією замінити робочу таблицю проміжною
+//   { cancel:true }           — передумав: викинути проміжну, робоча лишається як була
+app.post('/api/restore', async (req, res) => {
+  if (!hasFullKey(req)) return res.status(401).json({ error: 'unauthorized' });
+  const body = req.body || {};
+  const client = await pool.connect();
+  try {
+    if (body.start === true) {
+      await client.query('DROP TABLE IF EXISTS compatibility_restore');
+      await client.query(`CREATE TABLE compatibility_restore (
+        sku TEXT NOT NULL, brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL,
+        model_norm TEXT NOT NULL, code TEXT NOT NULL DEFAULT '', code_norm TEXT NOT NULL DEFAULT ''
+      )`);
+      return res.json({ ok: true, stage: 'started' });
+    }
+
+    if (Array.isArray(body.rows)) {
+      const vals = [], params = [];
+      for (const r of body.rows) {
+        const sku = String((r && r[0]) || '').trim();
+        const model = String((r && r[2]) || '').trim();
+        const mn = norm(model);
+        if (!sku || !mn) continue;
+        const code = String((r && r[3]) || '').trim();
+        const b = params.length;
+        vals.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6})`);
+        params.push(sku, String((r && r[1]) || '').trim(), model, mn, code, norm(code));
+      }
+      if (!vals.length) return res.json({ ok: true, added: 0 });
+      await client.query(
+        'INSERT INTO compatibility_restore (sku,brand,model,model_norm,code,code_norm) VALUES ' + vals.join(','),
+        params
+      );
+      return res.json({ ok: true, added: vals.length });
+    }
+
+    if (body.commit === true) {
+      const { rows: cnt } = await client.query('SELECT COUNT(*)::int AS n FROM compatibility_restore');
+      if (!cnt[0] || !cnt[0].n) return res.status(400).json({ error: 'empty_restore' });
+      await client.query('BEGIN');
+      await client.query('DELETE FROM compatibility');
+      const ins = await client.query(`INSERT INTO compatibility (sku,brand,model,model_norm,code,code_norm)
+        SELECT DISTINCT ON (sku, model_norm) sku,brand,model,model_norm,code,code_norm
+          FROM compatibility_restore ORDER BY sku, model_norm`);
+      await client.query('COMMIT');
+      await client.query('DROP TABLE IF EXISTS compatibility_restore');
+      return res.json({ ok: true, restored: ins.rowCount });
+    }
+
+    if (body.cancel === true) {
+      await client.query('DROP TABLE IF EXISTS compatibility_restore');
+      return res.json({ ok: true, stage: 'cancelled' });
+    }
+
+    res.status(400).json({ error: 'bad_request' });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (e2) { /* транзакції могло й не бути */ }
+    console.error('restore', e.message);
+    res.status(500).json({ error: 'server_error' });
+  } finally {
+    client.release();
+  }
+});
+
 // === Діагностика донора: що саме він віддає (БЕЗ запису в базу) ===
 // POST /api/donor-probe   headers: X-Import-Key
 // body: { host?, url|pid, code? }
@@ -1225,6 +1332,24 @@ WISL 105"></textarea>
   <div class="out" id="xOut"></div>
 </div>
 
+<div class="card danger-card" id="cardBak" style="display:none">
+  <h2>Резервна копія бази моделей</h2>
+  <p class="hint">Зроби копію <b>перед</b> будь-яким масовим заливанням. У файл потрапляє вся
+  таблиця сумісності (артикул, бренд, модель, код) — саме те, з чого її можна відновити
+  один-в-один. Зберігай файл у себе на комп'ютері.</p>
+  <button id="bakGo">Завантажити резервну копію (.tsv)</button>
+  <div class="out" id="bakOut"></div>
+
+  <p class="hint" style="margin-top:18px"><b>Відновлення.</b> Прикріпи раніше збережений файл —
+  уся поточна таблиця буде замінена вмістом файлу. Заливка йде в проміжну таблицю, і робоча
+  замінюється лише в самому кінці, однією дією: якщо зв'язок обірветься посеред процесу,
+  наявні дані не постраждають.</p>
+  <label>Файл резервної копії (.tsv)</label>
+  <input id="resFile" type="file" accept=".tsv,.txt,.csv,text/plain">
+  <button id="resGo">Відновити з файлу</button>
+  <div class="out" id="resOut"></div>
+</div>
+
 <div class="card">
   <h2>1в) Забрати моделі зі сторінки донора</h2>
   <p class="hint">Замість закладки в браузері: сервер сам обходить усі бренди товару на
@@ -1347,12 +1472,14 @@ remEl.addEventListener('change',persistKey);
 keyEl.addEventListener('input',persistKey);
 
 // ── роль ключа: масові розділи (0 і 2) показуємо лише під головним ключем ──
-var cardExp=document.getElementById('cardExp'),cardFeed=document.getElementById('cardFeed');
+var cardExp=document.getElementById('cardExp'),cardFeed=document.getElementById('cardFeed'),
+    cardBak=document.getElementById('cardBak');
 var roleTimer=null;
 function applyRole(role){
   var full=(role==='full');
   cardExp.style.display=full?'':'none';
   cardFeed.style.display=full?'':'none';
+  cardBak.style.display=full?'':'none';
 }
 function checkRole(){
   var k=key();
@@ -1528,6 +1655,79 @@ dTsv.onclick=function(){
   var a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download='modeli_donor.tsv'; a.click();
   setTimeout(function(){URL.revokeObjectURL(a.href);},1000);
+};
+
+// ── резервна копія бази моделей ──
+var bakGo=document.getElementById('bakGo'),bakOut=document.getElementById('bakOut');
+bakGo.onclick=function(){
+  if(!key()){alert('Введи ключ');return;}
+  bakGo.disabled=true; show(bakOut,'','Готую копію… на великій базі це може зайняти хвилину.');
+  fetch('/api/backup',{headers:{'X-Import-Key':key()}})
+    .then(function(r){
+      if(!r.ok) return r.json().then(function(d){throw new Error((d&&d.error)==='unauthorized'?'невірний ключ (потрібен головний IMPORT_KEY)':((d&&d.error)||'HTTP '+r.status));});
+      return r.blob();
+    })
+    .then(function(blob){
+      var name='compatibility-backup-'+new Date().toISOString().slice(0,10)+'.tsv';
+      var a=document.createElement('a');
+      a.href=URL.createObjectURL(blob); a.download=name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){URL.revokeObjectURL(a.href);},1000);
+      show(bakOut,'ok','Готово ✔ Файл '+name+' завантажено ('+Math.round(blob.size/1024)+' КБ).\\nЗбережи його — з нього відновлюється вся таблиця.');
+    })
+    .catch(function(e){show(bakOut,'bad','Помилка: '+e.message);})
+    .finally(function(){bakGo.disabled=false;});
+};
+
+// ── відновлення з файлу: порціями в проміжну таблицю, заміна — в самому кінці ──
+var resGo=document.getElementById('resGo'),resOut=document.getElementById('resOut');
+function resPost(body){
+  return fetch('/api/restore',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},
+    body:JSON.stringify(body)})
+    .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error((d&&d.error)||'HTTP '+r.status);return d;});});
+}
+resGo.onclick=function(){
+  if(!key()){alert('Введи ключ');return;}
+  var f=document.getElementById('resFile').files[0];
+  if(!f){alert('Прикріпи файл резервної копії');return;}
+  var reader=new FileReader();
+  reader.onload=function(){
+    var text=String(reader.result).replace(/^\\ufeff/,'');
+    var lines=text.split(/\\r\\n|\\r|\\n/);
+    var rows=[];
+    for(var i=0;i<lines.length;i++){
+      if(!lines[i].trim()) continue;
+      var c=lines[i].split('\\t');
+      if(i===0&&/^(sku|артикул)$/i.test((c[0]||'').trim())) continue;   // заголовок
+      if(c.length<3){show(resOut,'bad','Рядок '+(i+1)+' не схожий на резервну копію (потрібні 4 колонки через табуляцію). Відновлення не почато.');return;}
+      rows.push([c[0],c[1],c[2],c[3]||'']);
+    }
+    if(!rows.length){show(resOut,'bad','У файлі немає рядків — відновлення не почато.');return;}
+    if(!confirm('У файлі '+rows.length+' рядків.\\nУся поточна таблиця сумісності буде замінена ними.\\nПродовжити?')) return;
+
+    resGo.disabled=true;
+    var CH=2000,sent=0;
+    show(resOut,'','Готую…');
+    resPost({start:true})
+      .then(function next(){
+        if(sent>=rows.length) return null;
+        var part=rows.slice(sent,sent+CH);
+        return resPost({rows:part}).then(function(){
+          sent+=part.length;
+          show(resOut,'','Завантажую: '+sent+' з '+rows.length+' рядків… (робоча таблиця ще не змінена)');
+          return next();
+        });
+      })
+      .then(function(){show(resOut,'','Замінюю таблицю…');return resPost({commit:true});})
+      .then(function(d){show(resOut,'ok','Готово ✔ Відновлено рядків: '+d.restored);})
+      .catch(function(e){
+        show(resOut,'bad','Помилка: '+e.message+'\\nРобоча таблиця НЕ змінена. Прибираю проміжні дані…');
+        resPost({cancel:true}).catch(function(){});
+      })
+      .finally(function(){resGo.disabled=false;});
+  };
+  reader.onerror=function(){show(resOut,'bad','Не вдалося прочитати файл');};
+  reader.readAsText(f,'utf-8');
 };
 
 // ── 1в-0) перевірка зв'язку з донором (перше, що тиснеться після деплою) ──
