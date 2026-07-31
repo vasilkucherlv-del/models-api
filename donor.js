@@ -103,12 +103,62 @@ async function resolvePid(input, opts) {
   if (m) return m[1];
 
   if (!/^https?:\/\//i.test(raw)) throw new Error('bad_pid');
-  const html = await getText(raw, opts);
-  const hit = html.match(/compatibility\/(\d+)/)
-           || html.match(/data-product-id=["'](\d+)["']/)
-           || html.match(/["']product_id["']\s*:\s*["']?(\d+)/);
-  if (!hit) throw new Error('pid_not_found');
-  return hit[1];
+  const o = opts || {};
+  const html = await getText(raw, o);
+  const hit = html.match(/compatibility\/(\d+)/);
+  if (hit) return hit[1];
+
+  // Сліду «compatibility/<ID>» у HTML немає — отже блок сумісності підвантажується
+  // скриптом. Тоді збираємо з коду сторінки всі числа, схожі на ID товару, і просто
+  // ПЕРЕВІРЯЄМО кожен на API сумісності: правильний віддасть список брендів.
+  // Так ID не треба діставати руками з DevTools чи з імені файлу закладки.
+  const host = parseHost(new URL(raw).hostname);
+  const lang = o.lang || DEFAULTS.lang;
+  const tried = [];
+  for (const id of idCandidates(html, raw)) {
+    if (tried.length >= (o.maxIdTries || 8)) break;
+    tried.push(id);
+    try {
+      const data = await getJson(`https://${host}/${lang}/api/models/compatibility/${id}`, o);
+      const brands = findBrands(data);
+      if (brands && brands.length) return id;
+    } catch (e) { /* не той ID — пробуємо наступний */ }
+    await sleep(o.delayMs != null ? o.delayMs : DEFAULTS.delayMs);
+  }
+  const err = new Error('pid_not_found');
+  err.tried = tried;
+  throw err;
+}
+
+// Числа зі сторінки, схожі на ID товару, від найімовірнішого до найменш імовірного.
+// Беремо з типових місць (data-атрибути, JSON у скриптах, посилання на кошик/обране),
+// відсіюючи роки, ціни й інші випадкові числа.
+function idCandidates(html, pageUrl) {
+  const out = [];
+  const seen = new Set();
+  const add = (v) => {
+    const s = String(v || '').replace(/^0+(?=\d)/, '');
+    if (!/^\d{1,9}$/.test(s)) return;
+    const n = parseInt(s, 10);
+    if (n <= 0) return;
+    if (seen.has(s)) return;
+    seen.add(s);
+    out.push(s);
+  };
+  const grab = (re) => { let m; while ((m = re.exec(html))) add(m[1]); };
+
+  // Порядок важливий: спершу те, що прямо називає себе ID товару, і лише потім
+  // загальні «id» — інакше в перших спробах опиниться ID категорії чи банера.
+  grab(/data-product[-_]?id=["'](\d+)["']/gi);
+  grab(/["'](?:product_id|productId|item_id|itemId|offer_id)["']\s*:\s*["']?(\d+)/gi);
+  grab(/\/(?:cart|basket|wishlist|favorite[s]?|compare)\/(?:add\/)?(\d+)/gi);
+  grab(/name=["']product(?:_id)?["'][^>]*value=["'](\d+)["']/gi);
+  grab(/value=["'](\d+)["'][^>]*name=["']product(?:_id)?["']/gi);
+  grab(/["'](?:productID|sku)["']\s*:\s*["'](\d+)["']/gi);      // JSON-LD
+  grab(/data-id=["'](\d+)["']/gi);
+  grab(/["']id["']\s*:\s*(\d+)/gi);
+  if (pageUrl) { const m = String(pageUrl).match(/\/(\d+)(?:\/|$|\?)/); if (m) add(m[1]); }
+  return out;
 }
 
 // Головна функція: обходить усі бренди товару й повертає зведений список моделей.
@@ -164,4 +214,4 @@ async function collectDonorModels(options) {
   return { host, pid, brands: brands.length, models, failed, stopped };
 }
 
-module.exports = { collectDonorModels, resolvePid, parseHost, findBrands, findModels, DEFAULTS };
+module.exports = { collectDonorModels, resolvePid, idCandidates, parseHost, findBrands, findModels, DEFAULTS };

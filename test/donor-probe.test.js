@@ -80,7 +80,7 @@ const has = (v, re) => v.some((s) => re.test(s));
   r = await probeDonor({ host: 'donor.example', url: 'https://donor.example/ua/tovar/' });
   assert.strictEqual(r.pid, '');
   assert.strictEqual(r.steps.length, 1, 'далі йти немає сенсу');
-  assert.ok(has(r.verdict, /DevTools/), 'треба підказати, де взяти ID');
+  assert.ok(has(r.verdict, /models_<ID>\.xls/), 'треба підказати найпростіший спосіб узяти ID');
 
   // ── без товару взагалі — зрозуміла помилка ──
   await assert.rejects(probeDonor({ host: 'donor.example' }), /pid_or_url_required/);
