@@ -1284,6 +1284,7 @@ select{margin-top:4px;padding:10px 12px;font-size:15px;border:1px solid #d0d7de;
 <label>Ключ (IMPORT_KEY)</label>
 <input id="key" type="password" autocomplete="off" placeholder="встав ключ">
 <div class="row"><input id="keyRemember" type="checkbox"><label style="margin:0;font-weight:400">Запам'ятати ключ у цьому браузері</label></div>
+<div class="hint" id="roleInfo">Ключ не введено.</div>
 
 <div class="card danger-card" id="cardExp" style="display:none">
   <h2>0) Наповнити з повного експорту (рекомендовано)</h2>
@@ -1345,7 +1346,10 @@ WISL 105"></textarea>
   замінюється лише в самому кінці, однією дією: якщо зв'язок обірветься посеред процесу,
   наявні дані не постраждають.</p>
   <label>Файл резервної копії (.tsv)</label>
-  <input id="resFile" type="file" accept=".tsv,.txt,.csv,text/plain">
+  <p class="hint" style="margin:0 0 6px">Заливай файл таким, як завантажився. Дивитись його в Excel
+  можна, але <b>не перезберігай як .csv</b> — зміниться роздільник (у колонці «код» бувають коми,
+  тому копія робиться через табуляцію), і такий файл відновлення не прийме.</p>
+  <input id="resFile" type="file" accept=".tsv,.txt,text/tab-separated-values,text/plain">
   <button id="resGo">Відновити з файлу</button>
   <div class="out" id="resOut"></div>
 </div>
@@ -1475,11 +1479,17 @@ keyEl.addEventListener('input',persistKey);
 var cardExp=document.getElementById('cardExp'),cardFeed=document.getElementById('cardFeed'),
     cardBak=document.getElementById('cardBak');
 var roleTimer=null;
+// Розділи 0, 2 і «Резервна копія» — лише під головним ключем. Мовчки ховати їх не можна:
+// незрозуміло, чи розділу немає взагалі, чи не той ключ. Тому підпис під полем каже, що видно.
+var roleInfo=document.getElementById('roleInfo');
 function applyRole(role){
   var full=(role==='full');
   cardExp.style.display=full?'':'none';
   cardFeed.style.display=full?'':'none';
   cardBak.style.display=full?'':'none';
+  if(full) roleInfo.textContent='Ключ головний (IMPORT_KEY) — доступні всі розділи.';
+  else if(role==='manager') roleInfo.textContent='Ключ менеджера (MANAGER_KEY) — доступні розділи 1, 1б і 1в. Розділи «0)», «2)» і «Резервна копія бази моделей» під ним сховані: для них потрібен головний ключ IMPORT_KEY.';
+  else roleInfo.textContent=key()?'Ключ не розпізнано — перевір, чи це значення IMPORT_KEY (або MANAGER_KEY) зі змінних сервісу в Railway.':'Ключ не введено.';
 }
 function checkRole(){
   var k=key();
