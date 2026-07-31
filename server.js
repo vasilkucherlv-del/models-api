@@ -8,6 +8,9 @@ const XLSX = require('xlsx');
 const { pool, norm, init } = require('./db');
 const { parseFeed } = require('./import-feed');
 const { parseTables } = require('./table-parser');
+const { collectDonorModels } = require('./donor');
+const { matchDonorProduct } = require('./donor-search');
+const { codesFromName } = require('./donor-code');
 
 const PORT = process.env.PORT || 3000;
 const MIN_CHARS = parseInt(process.env.MIN_CHARS || '3', 10);     // мінімум символів для пошуку
@@ -62,8 +65,9 @@ function hasManagerKey(req) {
 // Роль ключа — щоб сторінка /admin показувала лише дозволені розділи.
 // 'full' — усе; 'manager' — лише додавання моделей (1 і 1б); 'none' — нічого.
 app.get('/api/keyinfo', (req, res) => {
-  if (hasFullKey(req)) return res.json({ role: 'full' });
-  if (hasManagerKey(req)) return res.json({ role: 'manager' });
+  const donorHost = process.env.DONOR_HOST || '';
+  if (hasFullKey(req)) return res.json({ role: 'full', donorHost });
+  if (hasManagerKey(req)) return res.json({ role: 'manager', donorHost });
   res.json({ role: 'none' });
 });
 
@@ -786,6 +790,209 @@ async function upsertRows(client, rows) {
   return n;
 }
 
+// Спільні межі для роботи з донором: скільки товарів за один запит, пауза між
+// запитами до чужого сайту і стеля часу на весь запит (щоб не впертись у таймаут).
+const DONOR_MAX_ITEMS = parseInt(process.env.DONOR_MAX_ITEMS || '20', 10);
+const DONOR_DELAY_MS = parseInt(process.env.DONOR_DELAY_MS || '900', 10);
+const DONOR_BUDGET_MS = parseInt(process.env.DONOR_BUDGET_MS || '210000', 10);
+
+// === Звірка з донором: знайти товар за каталожним кодом (БЕЗ запису в базу) ===
+// Каталожний код беремо з назви товару у фіді (там він і лежить: «… Bosch 00491669»).
+// Індекс фіду тримаємо в пам'яті 10 хв — щоб звірка пачками не качала його щоразу.
+let feedCache = { at: 0, byS: null };
+async function feedIndex() {
+  if (feedCache.byS && Date.now() - feedCache.at < 10 * 60 * 1000) return feedCache.byS;
+  const r = await fetch(FEED_URL, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36', 'Accept': 'application/xml,text/xml,*/*' }
+  });
+  if (!r.ok) throw new Error('фід недоступний (HTTP ' + r.status + ')');
+  const xml = await r.text();
+  const cd = (s) => String(s || '').replace(/<!\[CDATA\[|\]\]>/g, '').replace(/\s+/g, ' ').trim();
+  const byS = new Map();
+  for (const off of xml.split('<offer').slice(1)) {
+    const vc = off.match(/<vendorCode>([\s\S]*?)<\/vendorCode>/);
+    const nm = off.match(/<name>([\s\S]*?)<\/name>/);
+    if (!vc || !nm) continue;
+    const sku = cd(vc[1]);
+    if (!sku) continue;
+    const vd = off.match(/<vendor>([\s\S]*?)<\/vendor>/);
+    byS.set(sku, { name: cd(nm[1]), vendor: vd ? cd(vd[1]) : '' });
+  }
+  feedCache = { at: Date.now(), byS };
+  return byS;
+}
+
+// POST /api/match-donor   headers: X-Import-Key
+// body: { host?, skus:["0873",…] }              — звірити конкретні артикули
+//    або { host?, items:[{sku,code|name}] }     — свої коди/назви, без фіду
+//    або { host?, mode:"missing", limit:20 }    — артикули з фіду, яких ще нема в базі
+// Нічого не пише: віддає, який товар знайшовся на донорі й наскільки впевнено.
+app.post('/api/match-donor', async (req, res) => {
+  if (!hasManagerKey(req)) return res.status(401).json({ error: 'unauthorized' });
+  const body = req.body || {};
+  const host = String(body.host || process.env.DONOR_HOST || '').trim();
+  if (!host) return res.status(400).json({ error: 'host_required' });
+  const limit = Math.min(parseInt(body.limit || DONOR_MAX_ITEMS, 10) || DONOR_MAX_ITEMS, DONOR_MAX_ITEMS);
+
+  try {
+    let jobs = [];
+    if (Array.isArray(body.items) && body.items.length) {
+      jobs = body.items.map((it) => ({
+        sku: String((it && it.sku) || '').trim(),
+        name: String((it && it.name) || '').trim(),
+        vendor: String((it && it.vendor) || '').trim(),
+        codes: (it && it.code) ? [String(it.code).trim()] : null,
+      }));
+    } else if (Array.isArray(body.skus) && body.skus.length) {
+      const idx = await feedIndex();
+      jobs = body.skus.map((s) => {
+        const sku = String(s || '').trim();
+        const f = idx.get(sku) || { name: '', vendor: '' };
+        return { sku, name: f.name, vendor: f.vendor, codes: null };
+      });
+    } else if (body.mode === 'missing') {
+      const idx = await feedIndex();
+      const { rows } = await pool.query('SELECT DISTINCT sku FROM compatibility');
+      const have = new Set(rows.map((r) => r.sku));
+      for (const [sku, f] of idx) {
+        if (have.has(sku)) continue;
+        jobs.push({ sku, name: f.name, vendor: f.vendor, codes: null });
+        if (jobs.length >= limit) break;
+      }
+    } else {
+      return res.status(400).json({ error: 'items_or_skus_required' });
+    }
+
+    jobs = jobs.filter((j) => j.sku).slice(0, limit);
+    if (!jobs.length) return res.json({ host, results: [] });
+
+    const deadline = Date.now() + DONOR_BUDGET_MS;
+    const results = [];
+    for (const job of jobs) {
+      if (Date.now() > deadline) { results.push({ sku: job.sku, confidence: 'none', reason: 'time_budget' }); continue; }
+      const codes = job.codes && job.codes.length ? job.codes : codesFromName(job.name, job.vendor);
+      if (!codes.length) { results.push({ sku: job.sku, name: job.name, confidence: 'none', reason: 'no_code' }); continue; }
+      const m = await matchDonorProduct({
+        host, codes, delayMs: DONOR_DELAY_MS,
+        cookie: process.env.DONOR_COOKIE || '', lang: process.env.DONOR_LANG || 'ua',
+      });
+      results.push({
+        sku: job.sku, name: job.name, code: m.code || codes[0], tried: codes,
+        title: m.title || '', url: m.url || '', pid: m.pid || '',
+        confidence: m.confidence, reason: m.reason || '',
+      });
+    }
+    res.json({
+      host,
+      exact: results.filter((r) => r.confidence === 'exact').length,
+      weak: results.filter((r) => r.confidence === 'weak').length,
+      none: results.filter((r) => r.confidence === 'none').length,
+      results,
+    });
+  } catch (e) {
+    console.error('match-donor', e.message);
+    res.status(500).json({ error: e.message || 'server_error' });
+  }
+});
+
+// === Забрати моделі зі сторінки товару на сайті-донорі ===
+// POST /api/import-donor   headers: X-Import-Key: <IMPORT_KEY | MANAGER_KEY>
+// body: { sku, pid|url|code, host?, replace?, dryRun? }
+//    або { items:[{sku, pid|code}], host?, replace?, dryRun?, allowWeak? }  — пачкою, до DONOR_MAX_ITEMS
+// Робить те саме, що робила закладка в браузері: обходить усі бренди товару на донорі
+// й зводить моделі в один список. Пауза між брендами — щоб не довбати чужий сайт.
+// Замість pid товар можна задати кодом: { sku, code } — тоді спершу відпрацює пошук,
+// і в базу піде лише ТОЧНИЙ збіг (слабкий — тільки з allowWeak, тобто після твого підтвердження).
+app.post('/api/import-donor', async (req, res) => {
+  if (!hasManagerKey(req)) return res.status(401).json({ error: 'unauthorized' });
+  const body = req.body || {};
+  const host = String(body.host || process.env.DONOR_HOST || '').trim();
+  if (!host) return res.status(400).json({ error: 'host_required' });
+
+  const items = Array.isArray(body.items) && body.items.length
+    ? body.items
+    : [{ sku: body.sku, pid: body.pid || body.url, code: body.code }];
+  const jobs = items
+    .map((it) => ({
+      sku: String((it && it.sku) || '').trim(),
+      pid: String((it && (it.pid || it.url)) || '').trim(),
+      code: String((it && it.code) || '').trim(),
+    }))
+    .filter((it) => it.pid || it.code);
+  if (!jobs.length) return res.status(400).json({ error: 'items_required' });
+  if (jobs.length > DONOR_MAX_ITEMS) return res.status(400).json({ error: 'too_many_items', max: DONOR_MAX_ITEMS });
+
+  const dryRun = body.dryRun === true;
+  const replace = body.replace === true;
+  const allowWeak = body.allowWeak === true;
+  if (!dryRun && jobs.some((j) => !j.sku)) return res.status(400).json({ error: 'sku_required' });
+
+  const deadline = Date.now() + DONOR_BUDGET_MS;
+  const results = [];
+  for (const job of jobs) {
+    const left = deadline - Date.now();
+    if (left <= 5000) { results.push({ sku: job.sku, pid: job.pid, error: 'time_budget' }); continue; }
+    try {
+      // Задано лише код — спершу знаходимо товар на донорі. Слабкий збіг у базу не пускаємо:
+      // це саме той випадок, коли автопошук може підсунути схожу, але іншу деталь.
+      if (!job.pid) {
+        const m = await matchDonorProduct({
+          host, codes: [job.code], delayMs: DONOR_DELAY_MS,
+          cookie: process.env.DONOR_COOKIE || '', lang: process.env.DONOR_LANG || 'ua',
+        });
+        if (!m.pid || (m.confidence !== 'exact' && !allowWeak)) {
+          results.push({ sku: job.sku, code: job.code, error: 'no_match', confidence: m.confidence, reason: m.reason || '' });
+          continue;
+        }
+        job.pid = m.pid;
+        job.matched = { title: m.title || '', url: m.url || '', confidence: m.confidence };
+      }
+      const got = await collectDonorModels({
+        host, pid: job.pid, delayMs: DONOR_DELAY_MS, timeBudgetMs: left,
+        cookie: process.env.DONOR_COOKIE || '',
+        lang: process.env.DONOR_LANG || 'ua',
+      });
+      const rows = [];
+      for (const m of got.models) {
+        const mn = norm(m.model);
+        if (!mn) continue;
+        rows.push({ sku: job.sku, brand: m.brand, model: m.model, model_norm: mn, code: m.code || '' });
+      }
+      const base = {
+        sku: job.sku, pid: got.pid, brands: got.brands, models: got.models.length,
+        failed: got.failed, stopped: got.stopped,
+      };
+      if (job.matched) base.matched = job.matched;
+      if (dryRun) { results.push(Object.assign({ dryRun: true, sample: got.models.slice(0, 10) }, base)); continue; }
+      if (!rows.length) { results.push(Object.assign({ error: 'no_models' }, base)); continue; }
+
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        if (replace) await client.query('DELETE FROM compatibility WHERE sku = $1', [job.sku]);
+        const n = await upsertRows(client, rows);
+        await client.query('COMMIT');
+        results.push(Object.assign({ processed: n }, base));
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+    } catch (e) {
+      console.error('import-donor', job.pid, e.message);
+      results.push({ sku: job.sku, pid: job.pid, error: e.message || 'failed' });
+    }
+  }
+
+  res.json({
+    host,
+    ok: results.filter((r) => !r.error).length,
+    processed: results.reduce((s, r) => s + (r.processed || 0), 0),
+    results,
+  });
+});
+
 // === Наповнення БД прямо з фіду Horoshop (кнопка для не-програміста) ===
 // POST /api/import-feed   headers: X-Import-Key: <IMPORT_KEY>
 // body (необов'язково): { "sku":"0873", "replace":true }
@@ -990,6 +1197,38 @@ WISL 105"></textarea>
 </div>
 
 <div class="card">
+  <h2>1в) Забрати моделі зі сторінки донора</h2>
+  <p class="hint">Замість закладки в браузері: сервер сам обходить усі бренди товару на
+  сайті-донорі й складає список. Один рядок = один товар: <b>твій артикул</b>, далі
+  посилання на сторінку донора (або числовий ID). Кілька рядків — пачкою.
+  Спершу тисни «Лише перевірити» — покаже, скільки моделей знайшлось, нічого не записуючи.</p>
+  <label>Сайт-донор</label>
+  <input id="dHost" type="text" placeholder="напр. donor.example (можна вставити будь-яке посилання з нього)">
+  <label>Товари (артикул + посилання або ID, по одному в рядку)</label>
+  <textarea id="dList" placeholder="0873	https://donor.example/ua/product-name
+237	48219"></textarea>
+  <div class="row"><input id="dReplace" type="checkbox" checked><label style="margin:0;font-weight:400">Замінити наявні моделі цих товарів</label></div>
+  <button id="dTest" style="background:#57606a">Лише перевірити</button>
+  <button id="dGo">Забрати і залити</button>
+  <div class="out" id="dOut"></div>
+
+  <hr style="border:0;border-top:1px solid #eef1f4;margin:20px 0">
+  <h2 style="font-size:15px">Автопошук за кодом — без посилань</h2>
+  <p class="hint">Каталожний код береться з назви товару у фіді («… Bosch <b>00491669</b>») і шукається
+  на донорі. Спершу — звірка: покаже, який товар знайшовся і чи код збігся. У базу підуть лише
+  позначені рядки. <b>Точний</b> збіг (код видно в назві/адресі знайденого товару) позначається сам;
+  <b>слабкий</b> — тільки якщо ти сам поставиш галочку, бо це може бути схожа, але інша деталь.</p>
+  <label>Артикули (через кому або рядками)</label>
+  <textarea id="mdSkus" style="min-height:70px" placeholder="0873, 237, 01715"></textarea>
+  <button id="mdGo">Звірити за кодами</button>
+  <button id="mdMissing" style="background:#57606a">Взяти ті, яких нема в базі</button>
+  <div class="out" id="mdOut"></div>
+  <div id="mdTable"></div>
+  <button id="mdImport" style="display:none">Залити позначені</button>
+  <div class="out" id="mdImpOut"></div>
+</div>
+
+<div class="card">
   <h2>Аналоги (вручну)</h2>
   <p class="hint">Вкладка «Аналоги» на сайті наповнюється сама — за спільними сумісними
   моделями. Тут можна ДОДАТКОВО задати ручні аналоги: вони показуються першими, саме у
@@ -1077,7 +1316,11 @@ function checkRole(){
   if(!k){applyRole('none');return;}
   fetch('/api/keyinfo',{headers:{'X-Import-Key':k}})
     .then(function(r){return r.json();})
-    .then(function(d){applyRole(d&&d.role);})
+    .then(function(d){
+      applyRole(d&&d.role);
+      var dh=document.getElementById('dHost');            // домен донора зі змінної DONOR_HOST
+      if(dh&&!dh.value&&d&&d.donorHost) dh.value=d.donorHost;
+    })
     .catch(function(){applyRole('none');});
 }
 keyEl.addEventListener('input',function(){clearTimeout(roleTimer);roleTimer=setTimeout(checkRole,400);});
@@ -1180,6 +1423,128 @@ xGo.onclick=function(){
   };
   reader.onerror=function(){show(xOut,'bad','Не вдалося прочитати файл');};
   reader.readAsDataURL(f);
+};
+
+// ── 1в) збір моделей зі сторінки товару на сайті-донорі ──
+var dGo=document.getElementById('dGo'),dTest=document.getElementById('dTest'),dOut=document.getElementById('dOut');
+function donorItems(){
+  var lines=document.getElementById('dList').value.split(/[\\r\\n]+/);
+  var items=[],bad=[];
+  for(var i=0;i<lines.length;i++){
+    var l=lines[i].trim();
+    if(!l||l.charAt(0)==='#') continue;
+    var parts=l.split(/[\\t;,]|\\s+/).map(function(s){return s.trim();}).filter(Boolean);
+    if(parts.length<2){bad.push(l);continue;}
+    items.push({sku:parts[0],pid:parts[1]});
+  }
+  return {items:items,bad:bad};
+}
+function donorRun(dry){
+  if(!key()){alert('Введи ключ');return;}
+  var host=document.getElementById('dHost').value.trim();
+  if(!host){alert('Впиши домен сайту-донора');return;}
+  var p=donorItems();
+  if(p.bad.length){alert('Не зрозумів рядок (потрібно «артикул» і посилання/ID):\\n'+p.bad[0]);return;}
+  if(!p.items.length){alert('Додай хоч один рядок «артикул + посилання або ID»');return;}
+  var replace=document.getElementById('dReplace').checked;
+  dGo.disabled=true; dTest.disabled=true;
+  show(dOut,'',(dry?'Перевіряю':'Збираю')+' на донорі… Товарів: '+p.items.length+'. Це може тривати кілька хвилин — не закривай сторінку.');
+  fetch('/api/import-donor',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},
+    body:JSON.stringify({host:host,items:p.items,replace:replace,dryRun:!!dry})})
+    .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+    .then(function(x){
+      if(!x.ok){show(dOut,'bad','Помилка: '+((x.d&&x.d.error)||'невідома')+(x.d&&x.d.error==='unauthorized'?' (невірний ключ)':''));return;}
+      var rows=(x.d&&x.d.results)||[];
+      var txt=rows.map(function(r){
+        var head=(r.sku||'—')+' ← '+r.pid+': ';
+        if(r.error) return head+'✖ '+r.error;
+        var s=r.models+' моделей із '+r.brands+' брендів';
+        if(!dry) s+=' → у базу '+r.processed;
+        if(r.failed&&r.failed.length) s+=' (не віддали: '+r.failed.join(', ')+')';
+        if(r.stopped) s+=' (обірвано за лімітом часу — запусти рештою пачки)';
+        return head+s;
+      }).join('\\n');
+      var fails=rows.filter(function(r){return r.error;}).length;
+      show(dOut,fails?'bad':'ok',(dry?'Перевірка (у базу нічого не записано)':'Готово ✔ Записано рядків: '+x.d.processed)+'\\n'+txt);
+    })
+    .catch(function(e){show(dOut,'bad','Помилка з\\'єднання: '+e.message+' (можливо, збір триває довше за таймаут — зменш кількість рядків)');})
+    .finally(function(){dGo.disabled=false;dTest.disabled=false;});
+}
+dGo.onclick=function(){donorRun(false);};
+dTest.onclick=function(){donorRun(true);};
+
+// ── 1в-2) автопошук товару на донорі за каталожним кодом ──
+var mdGo=document.getElementById('mdGo'),mdMissing=document.getElementById('mdMissing'),
+    mdOut=document.getElementById('mdOut'),mdTable=document.getElementById('mdTable'),
+    mdImport=document.getElementById('mdImport'),mdImpOut=document.getElementById('mdImpOut');
+var CONF={exact:'точний',weak:'слабкий',none:'не знайдено'};
+function mdRender(rows){
+  if(!rows.length){mdTable.innerHTML='';mdImport.style.display='none';return;}
+  var html='<table class="satab"><tr><th></th><th>Артикул</th><th>Код</th><th>Знайдено на донорі</th><th>Збіг</th></tr>';
+  rows.forEach(function(r,i){
+    var can=!!r.pid;
+    var found=r.title?esc(r.title):(r.reason?('— '+esc(r.reason)):'—');
+    if(can&&r.url) found='<a href="'+esc(r.url)+'" target="_blank" rel="noopener">'+found+'</a>';
+    html+='<tr><td>'+(can?'<input type="checkbox" data-i="'+i+'"'+(r.confidence==='exact'?' checked':'')+'>':'')+'</td>'
+        +'<td>'+esc(r.sku)+'</td><td>'+esc(r.code||'—')+'</td><td>'+found+'</td>'
+        +'<td>'+(CONF[r.confidence]||esc(r.confidence))+'</td></tr>';
+  });
+  mdTable.innerHTML=html+'</table>';
+  // індекс у mdRows відрізняється від індексу в rows — прив'язуємо галочку до pid+sku
+  var boxes=mdTable.querySelectorAll('input[type=checkbox]');
+  for(var b=0;b<boxes.length;b++){
+    var row=rows[parseInt(boxes[b].getAttribute('data-i'),10)];
+    boxes[b].dataset.sku=row.sku; boxes[b].dataset.pid=row.pid;
+  }
+  mdImport.style.display=rows.some(function(r){return r.pid;})?'':'none';
+}
+function mdRun(body){
+  if(!key()){alert('Введи ключ');return;}
+  var host=document.getElementById('dHost').value.trim();
+  if(!host){alert('Впиши домен сайту-донора');return;}
+  mdGo.disabled=true;mdMissing.disabled=true;mdTable.innerHTML='';mdImport.style.display='none';
+  show(mdOut,'','Шукаю на донорі… Це може тривати кілька хвилин — не закривай сторінку.');
+  fetch('/api/match-donor',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},
+    body:JSON.stringify(Object.assign({host:host},body))})
+    .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+    .then(function(x){
+      if(!x.ok){show(mdOut,'bad','Помилка: '+((x.d&&x.d.error)||'невідома'));return;}
+      var rows=(x.d&&x.d.results)||[];
+      if(!rows.length){show(mdOut,'bad','Нічого звіряти: у фіді не знайшлось таких артикулів (або всі вже в базі).');return;}
+      show(mdOut,x.d.exact?'ok':'bad','Звірка: точних '+x.d.exact+' · слабких '+x.d.weak+' · не знайдено '+x.d.none
+        +'\\nПознач потрібні рядки й тисни «Залити позначені».');
+      mdRender(rows);
+    })
+    .catch(function(e){show(mdOut,'bad','Помилка з\\'єднання: '+e.message);})
+    .finally(function(){mdGo.disabled=false;mdMissing.disabled=false;});
+}
+mdGo.onclick=function(){
+  var skus=document.getElementById('mdSkus').value.split(/[\\s,;]+/).filter(Boolean);
+  if(!skus.length){alert('Впиши артикули — або тисни «Взяти ті, яких нема в базі»');return;}
+  mdRun({skus:skus});
+};
+mdMissing.onclick=function(){mdRun({mode:'missing'});};
+mdImport.onclick=function(){
+  var boxes=mdTable.querySelectorAll('input[type=checkbox]');
+  var items=[];
+  for(var i=0;i<boxes.length;i++) if(boxes[i].checked) items.push({sku:boxes[i].dataset.sku,pid:boxes[i].dataset.pid});
+  if(!items.length){alert('Познач хоч один рядок');return;}
+  var host=document.getElementById('dHost').value.trim();
+  var replace=document.getElementById('dReplace').checked;
+  mdImport.disabled=true; show(mdImpOut,'','Забираю моделі для '+items.length+' товарів… Це може тривати кілька хвилин.');
+  fetch('/api/import-donor',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},
+    body:JSON.stringify({host:host,items:items,replace:replace})})
+    .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+    .then(function(x){
+      if(!x.ok){show(mdImpOut,'bad','Помилка: '+((x.d&&x.d.error)||'невідома'));return;}
+      var rows=(x.d&&x.d.results)||[];
+      var txt=rows.map(function(r){
+        return (r.sku||'—')+': '+(r.error?('✖ '+r.error):(r.models+' моделей → у базу '+r.processed));
+      }).join('\\n');
+      show(mdImpOut,rows.some(function(r){return r.error;})?'bad':'ok','Готово ✔ Записано рядків: '+x.d.processed+'\\n'+txt);
+    })
+    .catch(function(e){show(mdImpOut,'bad','Помилка з\\'єднання: '+e.message);})
+    .finally(function(){mdImport.disabled=false;});
 };
 
 // ── Службове: завантажити артикули з бази ──
