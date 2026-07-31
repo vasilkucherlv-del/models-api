@@ -120,11 +120,23 @@ const api = async (p, body) => {
   assert.deepStrictEqual(written.map((r) => r.model).sort(), ['SN26M231', 'WAE20164', 'WAE24164']);
   assert.strictEqual(written.find((r) => r.model === 'WAE24164').code, 'WAE-1');
 
-  // ── перевірка без запису ──
+  // ── перевірка без запису: віддається ВЕСЬ список (адмінка вивантажує його у .tsv) ──
   written.length = 0;
   const dry = await api('/api/import-donor', { items: [{ sku: '0873', pid: '501' }], dryRun: true });
   assert.strictEqual(dry.body.results[0].dryRun, true);
+  assert.strictEqual(dry.body.results[0].sample.length, 3, 'усі зібрані моделі, а не перші кілька');
+  assert.deepStrictEqual(dry.body.results[0].sample[0], { brand: 'Bosch', model: 'WAE24164', code: 'WAE-1' });
   assert.strictEqual(written.length, 0, 'у режимі перевірки в базу не пишемо');
+
+  // ── діагностика донора: проходить ланцюг і дає вердикт ──
+  const pb = await api('/api/donor-probe', { url: 'https://donor.example/ua/nasos-00144978/', code: '00144978' });
+  assert.strictEqual(pb.status, 200);
+  assert.strictEqual(pb.body.pid, '501');
+  assert.ok(pb.body.verdict.some((v) => /✔ Збір моделей працює/.test(v)), pb.body.verdict.join(' | '));
+  assert.ok(pb.body.verdict.some((v) => /Пошук працює шляхом/.test(v)), pb.body.verdict.join(' | '));
+  assert.ok(pb.body.steps.length >= 3);
+  const noTarget = await api('/api/donor-probe', {});
+  assert.strictEqual(noTarget.status, 400, 'без товару — зрозуміла помилка, а не 500');
 
   // ── заливка за кодом: точний збіг проходить, слабкий — ні ──
   written.length = 0;

@@ -11,6 +11,7 @@ const { parseTables } = require('./table-parser');
 const { collectDonorModels } = require('./donor');
 const { matchDonorProduct } = require('./donor-search');
 const { codesFromName } = require('./donor-code');
+const { probeDonor } = require('./donor-probe');
 
 const PORT = process.env.PORT || 3000;
 const MIN_CHARS = parseInt(process.env.MIN_CHARS || '3', 10);     // мінімум символів для пошуку
@@ -795,6 +796,32 @@ async function upsertRows(client, rows) {
 const DONOR_MAX_ITEMS = parseInt(process.env.DONOR_MAX_ITEMS || '20', 10);
 const DONOR_DELAY_MS = parseInt(process.env.DONOR_DELAY_MS || '900', 10);
 const DONOR_BUDGET_MS = parseInt(process.env.DONOR_BUDGET_MS || '210000', 10);
+const DONOR_DRY_CAP = parseInt(process.env.DONOR_DRY_CAP || '5000', 10);   // стеля списку в режимі перевірки
+
+// === Діагностика донора: що саме він віддає (БЕЗ запису в базу) ===
+// POST /api/donor-probe   headers: X-Import-Key
+// body: { host?, url|pid, code? }
+// Перше, що варто натиснути після деплою: перевіряє сторінку товару, список брендів,
+// моделі одного бренду й шляхи пошуку — і пояснює, що робити, якщо щось із цього не працює.
+app.post('/api/donor-probe', async (req, res) => {
+  if (!hasManagerKey(req)) return res.status(401).json({ error: 'unauthorized' });
+  const body = req.body || {};
+  const host = String(body.host || process.env.DONOR_HOST || '').trim();
+  if (!host) return res.status(400).json({ error: 'host_required' });
+  try {
+    const out = await probeDonor({
+      host,
+      url: String(body.url || '').trim(),
+      pid: String(body.pid || '').trim(),
+      code: String(body.code || '').trim(),
+      cookie: process.env.DONOR_COOKIE || '',
+      lang: process.env.DONOR_LANG || 'ua',
+    });
+    res.json(Object.assign({ hasCookie: !!process.env.DONOR_COOKIE }, out));
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'probe_failed' });
+  }
+});
 
 // === Звірка з донором: знайти товар за каталожним кодом (БЕЗ запису в базу) ===
 // Каталожний код беремо з назви товару у фіді (там він і лежить: «… Bosch 00491669»).
@@ -963,7 +990,9 @@ app.post('/api/import-donor', async (req, res) => {
         failed: got.failed, stopped: got.stopped,
       };
       if (job.matched) base.matched = job.matched;
-      if (dryRun) { results.push(Object.assign({ dryRun: true, sample: got.models.slice(0, 10) }, base)); continue; }
+      // Перевірка без запису віддає ВЕСЬ список — щоб адмінка могла вивантажити .tsv
+      // і його можна було звірити з файлом, який давала закладка, порівнянням файлів.
+      if (dryRun) { results.push(Object.assign({ dryRun: true, sample: got.models.slice(0, DONOR_DRY_CAP) }, base)); continue; }
       if (!rows.length) { results.push(Object.assign({ error: 'no_models' }, base)); continue; }
 
       const client = await pool.connect();
@@ -1204,12 +1233,26 @@ WISL 105"></textarea>
   Спершу тисни «Лише перевірити» — покаже, скільки моделей знайшлось, нічого не записуючи.</p>
   <label>Сайт-донор</label>
   <input id="dHost" type="text" placeholder="напр. donor.example (можна вставити будь-яке посилання з нього)">
+
+  <p class="hint" style="margin-top:14px"><b>Почни звідси.</b> Перевірка зв'язку: бере одну сторінку
+  товару донора й показує, чи читаються бренди та моделі, чи потрібен логін і який шлях пошуку
+  працює. Нічого не записує.</p>
+  <label>Посилання на будь-який товар донора (або його числовий ID)</label>
+  <input id="pbUrl" type="text" placeholder="https://donor.example/ua/tovar-name">
+  <label>Каталожний код для перевірки пошуку (необов'язково)</label>
+  <input id="pbCode" type="text" placeholder="напр. 00144978 — код тієї самої запчастини">
+  <button id="pbGo" style="background:#0969da">Перевірити зв'язок з донором</button>
+  <div class="out" id="pbOut"></div>
+  <div id="pbSteps"></div>
+
+  <hr style="border:0;border-top:1px solid #eef1f4;margin:20px 0">
   <label>Товари (артикул + посилання або ID, по одному в рядку)</label>
   <textarea id="dList" placeholder="0873	https://donor.example/ua/product-name
 237	48219"></textarea>
   <div class="row"><input id="dReplace" type="checkbox" checked><label style="margin:0;font-weight:400">Замінити наявні моделі цих товарів</label></div>
   <button id="dTest" style="background:#57606a">Лише перевірити</button>
   <button id="dGo">Забрати і залити</button>
+  <button id="dTsv" style="background:#57606a;display:none">Завантажити .tsv</button>
   <div class="out" id="dOut"></div>
 
   <hr style="border:0;border-top:1px solid #eef1f4;margin:20px 0">
@@ -1466,12 +1509,56 @@ function donorRun(dry){
       }).join('\\n');
       var fails=rows.filter(function(r){return r.error;}).length;
       show(dOut,fails?'bad':'ok',(dry?'Перевірка (у базу нічого не записано)':'Готово ✔ Записано рядків: '+x.d.processed)+'\\n'+txt);
+      // у режимі перевірки лишаємо зібране для вивантаження — щоб звірити з файлом закладки
+      dLast=[];
+      if(dry) rows.forEach(function(r){(r.sample||[]).forEach(function(m){dLast.push([r.sku||'',m.brand||'',m.model||'',m.code||'']);});});
+      dTsv.style.display=dLast.length?'':'none';
     })
     .catch(function(e){show(dOut,'bad','Помилка з\\'єднання: '+e.message+' (можливо, збір триває довше за таймаут — зменш кількість рядків)');})
     .finally(function(){dGo.disabled=false;dTest.disabled=false;});
 }
 dGo.onclick=function(){donorRun(false);};
 dTest.onclick=function(){donorRun(true);};
+
+// вивантаження зібраного у .tsv — той самий формат, що давала закладка (для звірки файлів)
+var dTsv=document.getElementById('dTsv'),dLast=[];
+dTsv.onclick=function(){
+  var rows=[['Артикул','Бренд','Модель','Код']].concat(dLast).map(function(r){return r.join('\\t');});
+  var blob=new Blob(['\\ufeff'+rows.join('\\r\\n')],{type:'text/tab-separated-values;charset=utf-8'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download='modeli_donor.tsv'; a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);},1000);
+};
+
+// ── 1в-0) перевірка зв'язку з донором (перше, що тиснеться після деплою) ──
+var pbGo=document.getElementById('pbGo'),pbOut=document.getElementById('pbOut'),pbSteps=document.getElementById('pbSteps');
+pbGo.onclick=function(){
+  if(!key()){alert('Введи ключ');return;}
+  var host=document.getElementById('dHost').value.trim();
+  var url=document.getElementById('pbUrl').value.trim();
+  var code=document.getElementById('pbCode').value.trim();
+  if(!host){alert('Впиши домен сайту-донора');return;}
+  if(!url){alert('Встав посилання на будь-який товар донора (або його числовий ID)');return;}
+  pbGo.disabled=true; pbSteps.innerHTML=''; show(pbOut,'','Перевіряю донора…');
+  fetch('/api/donor-probe',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},
+    body:JSON.stringify({host:host,url:/^\\d+$/.test(url)?'':url,pid:/^\\d+$/.test(url)?url:'',code:code})})
+    .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+    .then(function(x){
+      if(!x.ok){show(pbOut,'bad','Помилка: '+((x.d&&x.d.error)||'невідома'));return;}
+      var steps=(x.d&&x.d.steps)||[],verdict=(x.d&&x.d.verdict)||[];
+      var good=verdict.some(function(v){return v.indexOf('✔')===0;})&&!verdict.some(function(v){return v.indexOf('✖')===0;});
+      show(pbOut,good?'ok':'bad',verdict.join('\\n')+(x.d.hasCookie?'\\n(куку DONOR_COOKIE задано)':''));
+      var html='<table class="satab"><tr><th>Крок</th><th>Код</th><th>Що вийшло</th></tr>';
+      steps.forEach(function(s){
+        html+='<tr><td>'+(s.ok?'✔ ':'✖ ')+esc(s.title)+'<div class="hint" style="margin:2px 0 0;word-break:break-all">'+esc(s.url)+'</div></td>'
+            +'<td>'+(s.error?'—':s.status)+'</td><td>'+esc(s.found||s.error||'')
+            +(s.snippet?'<div class="hint" style="margin-top:4px">Відповідь донора: '+esc(s.snippet)+'</div>':'')+'</td></tr>';
+      });
+      pbSteps.innerHTML=html+'</table>';
+    })
+    .catch(function(e){show(pbOut,'bad','Помилка з\\'єднання: '+e.message);})
+    .finally(function(){pbGo.disabled=false;});
+};
 
 // ── 1в-2) автопошук товару на донорі за каталожним кодом ──
 var mdGo=document.getElementById('mdGo'),mdMissing=document.getElementById('mdMissing'),

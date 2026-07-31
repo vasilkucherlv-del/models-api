@@ -3,6 +3,7 @@ const fs = require('fs');
 const { collectDonorModels } = require('./donor');
 const { matchDonorProduct } = require('./donor-search');
 const { codesFromName } = require('./donor-code');
+const { probeDonor } = require('./donor-probe');
 
 // Збір сумісних моделей із сайту-донора і заливка їх у базу через API —
 // те саме, що робила закладка в браузері, але без браузера і одразу для багатьох товарів.
@@ -23,6 +24,9 @@ const { codesFromName } = require('./donor-code');
 //     --from-feed[=N]  взяти товари з фіду lartek (код витягується з назви)
 //     --missing        лише ті артикули, яких ще нема в базі (питає $API/api/skus)
 //     --allow-weak     дозволити слабкі збіги (за замовч. заливаються лише точні)
+//
+// Перевірка зв'язку з донором (перше, що варто запустити — нічого не збирає й не пише):
+//   node import-donor.js --probe --host=donor.example --url="https://donor.example/ua/tovar" --code=00144978
 //
 // Інші прапорці:
 //   --dry-run   нічого не пише в базу; показує, що знайшлось
@@ -139,6 +143,25 @@ async function pushToApi(sku, models) {
 
 (async () => {
   if (!HOST) die('вкажи --host=<домен донора> (або DONOR_HOST)');
+
+  // Діагностика: що саме віддає донор і що робити, якщо щось не працює.
+  if (flags.has('--probe')) {
+    const url = (opts.url || opts.pid || argv.find((a) => !a.startsWith('--')) || '').trim();
+    if (!url) die('для --probe вкажи --url=<посилання на товар донора> або --pid=<ID>');
+    const out = await probeDonor({
+      host: HOST, cookie: COOKIE, lang: LANG, code: (opts.code || '').trim(),
+      url: /^\d+$/.test(url) ? '' : url,
+      pid: /^\d+$/.test(url) ? url : '',
+    });
+    for (const s of out.steps) {
+      console.log(`${s.ok ? '✔' : '✖'} ${s.title}  [${s.error ? '—' : s.status}]  ${s.found || s.error || ''}`);
+      console.log(`   ${s.url}`);
+      if (s.snippet) console.log(`   відповідь донора: ${s.snippet}`);
+    }
+    console.log('');
+    out.verdict.forEach((v) => console.log(v));
+    return;
+  }
 
   const fromFeed = flags.has('--from-feed') || 'from-feed' in opts;
   const jobs = fromFeed
