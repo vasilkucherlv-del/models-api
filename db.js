@@ -11,12 +11,9 @@ const pool = new Pool({
   ssl: isLocal ? false : { rejectUnauthorized: false },
 });
 
-// Нормалізація коду моделі: великі літери, лише A-Z0-9.
-// ВАЖЛИВО: точно така сама нормалізація має бути у фронтенді,
-// щоб пошук "SMV68" знаходив "SMV68IX00D/01".
-function norm(s) {
-  return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-}
+// Нормалізація коду моделі живе в norm.js (щоб її могли брати й модулі без БД).
+// Тут лишається ре-експорт — усі наявні `require('./db').norm` працюють як раніше.
+const { norm } = require('./norm');
 
 async function init() {
   const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
