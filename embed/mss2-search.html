@@ -196,6 +196,23 @@
     if (!t || !DIM_RE.test(t)) return null;
     return t.replace(/\d+(?:p\d+)?(?:x\d+(?:p\d+)?)+/g, '"$&"');
   }
+  // ПОВНІША модель, ніж у базі: «VCM-K70GUAA», а в назвах лише «VCM-K70GU» —
+  // зайвий суфікс (тут 2 літери) більший за толерантність до одруківок, тож усі
+  // попередні рівні дають 0. Фолбек: відрізаємо хвостові ЛІТЕРИ коду по одній
+  // (k70guaa → k70gua → k70gu → …) і шукаємо як qPlainOf (по словах, збіг за
+  // початком слова: k70gu → K70GU). Береться ЛИШЕ коли все попереднє дало 0.
+  // Числові уламки («70wh»), кирилицю й розміри не чіпає (qPlainOf там null).
+  function qTrimList(raw){
+    var base = qPlainOf(raw);
+    if (!base) return [];
+    var out = [], cur = base;
+    for (var i = 0; i < 4; i++) {
+      if (!/\d[A-Za-zА-Яа-я]+$/.test(cur)) break; // тнемо лише літери ПІСЛЯ цифри
+      cur = cur.slice(0, -1);
+      out.push(cur);
+    }
+    return out;
+  }
   // База розміру, якщо введено НЕДОДРУКОВАНИЙ останній розмір (напр. «25*47*8/1» →
   // «25*47*8»). Потрібна лише коли повний запит нічого не знайшов — тоді пропонуємо
   // товари базового розміру. null, якщо це не «розмір + недодрукований хвіст».
@@ -209,7 +226,7 @@
   // лише коли попередній дав 0 — тож точні запити не «псуються».
   function orderedQ(){
     var out=[qNorm()];
-    [qRawPhraseOf(state.q), qPlainOf(state.q), qDimsLatinOf(state.q)].forEach(function(x){ if(x && out.indexOf(x)<0) out.push(x); });
+    [qRawPhraseOf(state.q), qPlainOf(state.q), qDimsLatinOf(state.q)].concat(qTrimList(state.q)).forEach(function(x){ if(x && out.indexOf(x)<0) out.push(x); });
     return out.filter(function(x){ return x!==''; });
   }
 
