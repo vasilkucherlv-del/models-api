@@ -64,11 +64,23 @@
     var m=String(name||'').match(/\d+(?:[.,]\d+)?(?:[ ]?[*xх×][ ]?\d+(?:[.,]\d+)?)+(?:[ ]?\/[ ]?\d+(?:[.,]\d+)?)?/i);
     return m?m[0].toLowerCase().replace(/,/g,'.').replace(/[ ]/g,'').replace(/[xх×]/g,'*'):null;
   }
+  // Код деталі у назві (напр. підшипник 6202/6203/6204): пралка має ОБИДВА
+  // підшипники, моделі спільні, але 6203 ≠ 6204 — не взаємозамінні. Беремо
+  // окремі 4-значні коди 3000–6999 (потужність 1600W/2000W і роки сюди не
+  // потрапляють). Суфікси (6202-2RS ↔ 6202-2Z) не заважають — код той самий.
+  function codesOf(name){
+    var out={}, s=String(name||''), m,
+        re=/(^|[^0-9a-zа-яёіїєґ])([3-6]\d{3})(?=$|[^0-9])/gi;
+    while((m=re.exec(s))) out[m[2]]=1;
+    return Object.keys(out);
+  }
   function conflicting(curName,name){
     var v1=volOf(curName), v2=volOf(name);
     if(v1!=null&&v2!=null&&Math.abs(v1-v2)>0.5) return true;
     var d1=dimOf(curName), d2=dimOf(name);
     if(d1&&d2&&d1!==d2) return true;
+    var c1=codesOf(curName), c2=codesOf(name);
+    if(c1.length&&c2.length&&!c1.some(function(x){return c2.indexOf(x)>=0;})) return true;
     return false;
   }
 
@@ -129,6 +141,15 @@
       var a=hd.querySelector('.la-arr'); if(a) a.innerHTML=open?'&#9662;':'&#9652;';
     };
     sec.appendChild(hd); sec.appendChild(inner);
+    // Десктоп без вкладки «Аналоги»: блок одразу ПІД секцією вкладок. Розкладок
+    // може бути кілька (дублі під різну ширину) — беремо видиму (offsetParent).
+    var navs=document.querySelectorAll('.product-heading__nav'), nav=null;
+    for(var n=0;n<navs.length;n++){ if(navs[n].offsetParent!==null){ nav=navs[n]; break; } }
+    if(!nav&&navs.length) nav=navs[0];
+    if(nav&&nav.closest){
+      var g=nav.closest('.product__group--tabs')||nav.closest('.product__group');
+      if(g&&g.parentNode){ g.parentNode.insertBefore(sec,g.nextSibling); return true; }
+    }
     var cm=document.querySelector('.lartek-compat-mount');
     var host=cm&&cm.closest&&cm.closest('.product__block');
     if(host&&host.parentNode){ host.parentNode.insertBefore(sec,host.nextSibling); return true; }
@@ -147,9 +168,12 @@
       if(found){
         mount=document.createElement('div');
         found.panel.innerHTML=''; found.panel.appendChild(mount);
-      } else if(!document.querySelector('.product-heading__tab, [class*="heading__tab"]')){
-        mount=document.createElement('div'); // мобільний шаблон: вставимо при render()
-      } else return;
+      } else {
+        // Вкладки є, але вкладки «Аналоги» немає (десктоп без ручної вкладки) —
+        // або вкладок немає взагалі (мобільний шаблон). В обох випадках власний
+        // блок вставиться лише при render(), тож без аналогів сторінка чиста.
+        mount=document.createElement('div');
+      }
     }
     var sku=metaSku();
     if(!sku){ if(found) hideTab(found); return; }
