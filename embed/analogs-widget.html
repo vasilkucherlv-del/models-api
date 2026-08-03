@@ -129,6 +129,15 @@
       var a=hd.querySelector('.la-arr'); if(a) a.innerHTML=open?'&#9662;':'&#9652;';
     };
     sec.appendChild(hd); sec.appendChild(inner);
+    // Десктоп без вкладки «Аналоги»: блок одразу ПІД секцією вкладок. Розкладок
+    // може бути кілька (дублі під різну ширину) — беремо видиму (offsetParent).
+    var navs=document.querySelectorAll('.product-heading__nav'), nav=null;
+    for(var n=0;n<navs.length;n++){ if(navs[n].offsetParent!==null){ nav=navs[n]; break; } }
+    if(!nav&&navs.length) nav=navs[0];
+    if(nav&&nav.closest){
+      var g=nav.closest('.product__group--tabs')||nav.closest('.product__group');
+      if(g&&g.parentNode){ g.parentNode.insertBefore(sec,g.nextSibling); return true; }
+    }
     var cm=document.querySelector('.lartek-compat-mount');
     var host=cm&&cm.closest&&cm.closest('.product__block');
     if(host&&host.parentNode){ host.parentNode.insertBefore(sec,host.nextSibling); return true; }
@@ -147,9 +156,12 @@
       if(found){
         mount=document.createElement('div');
         found.panel.innerHTML=''; found.panel.appendChild(mount);
-      } else if(!document.querySelector('.product-heading__tab, [class*="heading__tab"]')){
-        mount=document.createElement('div'); // мобільний шаблон: вставимо при render()
-      } else return;
+      } else {
+        // Вкладки є, але вкладки «Аналоги» немає (десктоп без ручної вкладки) —
+        // або вкладок немає взагалі (мобільний шаблон). В обох випадках власний
+        // блок вставиться лише при render(), тож без аналогів сторінка чиста.
+        mount=document.createElement('div');
+      }
     }
     var sku=metaSku();
     if(!sku){ if(found) hideTab(found); return; }
