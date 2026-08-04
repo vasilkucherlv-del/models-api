@@ -196,6 +196,17 @@
     if (!t || !DIM_RE.test(t)) return null;
     return t.replace(/\d+(?:p\d+)?(?:x\d+(?:p\d+)?)+/g, '"$&"');
   }
+  // ЗЛИТИЙ код, введений З ПРОБІЛОМ/ДЕФІСОМ: «vcc 4110», а в базі «VCC4110S3N»
+  // одним токеном — окремих слів «vcc»/«4110» там немає, тож і фраза, і
+  // по-словах дають 0. Кандидат: те саме БЕЗ пробілів і дефісів (Meili знайде
+  // за початком слова: vcc4110 → VCC4110S3N). Умови ті самі, що в qPlainOf
+  // (латиниця з літери, не розмір) — уламки типу «70wh» сюди не потрапляють.
+  function qJoinedOf(raw){
+    var s = qPlainOf(raw);
+    if (!s) return null;
+    var t = s.replace(/[\s\-]+/g, '');
+    return (t && t !== s) ? t : null;
+  }
   // ПОВНІША модель, ніж у базі: «VCM-K70GUAA», а в назвах лише «VCM-K70GU» —
   // зайвий суфікс (тут 2 літери) більший за толерантність до одруківок, тож усі
   // попередні рівні дають 0. Фолбек: відрізаємо хвостові ЛІТЕРИ коду по одній
@@ -226,8 +237,10 @@
   // лише коли попередній дав 0 — тож точні запити не «псуються».
   function orderedQ(){
     var out=[qNorm()];
-    [qRawPhraseOf(state.q), qPlainOf(state.q), qDimsLatinOf(state.q)].concat(qTrimList(state.q)).forEach(function(x){ if(x && out.indexOf(x)<0) out.push(x); });
-    return out.filter(function(x){ return x!==''; });
+    [qRawPhraseOf(state.q), qPlainOf(state.q), qJoinedOf(state.q), qDimsLatinOf(state.q)].concat(qTrimList(state.q)).forEach(function(x){ if(x && out.indexOf(x)<0) out.push(x); });
+    // Кандидат без жодної букви/цифри («!!!») для Meili — порожній запит,
+    // а порожній запит повертає ВЕСЬ каталог. Відкидаємо: буде «Нічого не знайдено».
+    return out.filter(function(x){ return x!=='' && /[0-9a-zа-яёіїєґ]/i.test(x); });
   }
 
   // ── Підказка-виправлення «Можливо, ви шукали…» ──
@@ -378,6 +391,11 @@
   function loadFacets(){
     if(!state.q){ side.innerHTML=''; if(gridEl) gridEl.classList.add('mss2-noside'); hideCatToggle(); state.total=0; return Promise.resolve(); }
     var cands=orderedQ();
+    // той самий фолбек «недодрукованого розміру», що й у результатах (renderFlat.dimFallback):
+    // інакше картки показують товари базового розміру, а лічильник/категорії — нуль.
+    var fb=dimBase(state.q);
+    if(fb){ var fbq=qNormOf(fb); if(fbq && cands.indexOf(fbq)<0) cands.push(fbq); }
+    if(!cands.length){ state.catDist={}; state.total=0; renderSide(); noteEl.textContent=''; return Promise.resolve(); }
     // той самий перебір кандидатів, що й у renderFlat — щоб лічильник і категорії збігались.
     function attempt(i){
       var q=cands[i];
@@ -438,7 +456,15 @@
     }
     var run;
     if(reset){
-      run=firstHit(orderedQ(), 0).then(function(d){
+      var cands=orderedQ();
+      // жодного осмисленого кандидата (напр. «!!!») — одразу «нічого не знайдено»
+      if(!cands.length){
+        state.total=0; state.hits=[]; countEl.textContent='Знайдено: 0';
+        results.innerHTML=suggestionHtml()+'<div class="mss2-empty">Нічого не знайдено за «'+esc(state.q)+'».</div>';
+        bindSuggest();
+        return Promise.resolve();
+      }
+      run=firstHit(cands, 0).then(function(d){
         if((d.estimatedTotalHits||0)===0) return dimFallback(d);
         return d;
       });
