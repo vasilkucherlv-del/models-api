@@ -1333,53 +1333,134 @@ app.post('/api/import-export', async (req, res) => {
 app.get('/admin', (_req, res) => {
   res.type('html').send(`<!doctype html><html lang="uk"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>Сумісні моделі — база</title>
-<style>body{font-family:Arial,sans-serif;max-width:720px;margin:32px auto;padding:0 16px;color:#1f2328}
-h1{font-size:20px;margin:0 0 6px}h2{font-size:16px;margin:0 0 4px}
-.card{border:1px solid #e3e6ea;border-radius:12px;padding:18px;margin:18px 0}
-label{display:block;margin:12px 0 4px;font-weight:700;font-size:14px}
-input[type=text],input[type=password],textarea{width:100%;box-sizing:border-box;padding:11px 12px;font-size:15px;border:1px solid #d0d7de;border-radius:8px;font-family:inherit}
-textarea{min-height:160px;resize:vertical;white-space:pre;overflow:auto}
+<style>
+:root{--bg:#f2f4f7;--card:#fff;--line:#d9dee5;--txt:#1f2328;--mut:#59626c;--green:#1f883d;--green-d:#166f31;--blue:#0969da;--red:#cf222e;--r:12px}
+*{box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:var(--bg);max-width:820px;margin:0 auto;padding:24px 16px 60px;color:var(--txt);line-height:1.45}
+h1{font-size:22px;margin:0}
+.top{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;box-shadow:0 1px 2px rgba(31,35,40,.04)}
+.top .sub{color:var(--mut);font-size:13px;margin:4px 0 14px}
+.grp{margin:26px 4px 10px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+details.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);margin:10px 0;box-shadow:0 1px 2px rgba(31,35,40,.04)}
+details.card>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;padding:14px 18px;font-size:15px;font-weight:700;border-radius:var(--r)}
+details.card>summary::-webkit-details-marker{display:none}
+details.card>summary:hover{background:#f6f8fa}
+details.card[open]>summary{border-bottom:1px solid #eef1f4;border-radius:var(--r) var(--r) 0 0}
+.chev{margin-left:auto;color:var(--mut);transition:transform .15s;flex:none}
+details[open]>summary .chev{transform:rotate(90deg)}
+.cbody{padding:4px 18px 18px}
+.b{flex:none;font-size:11px;font-weight:600;border-radius:20px;padding:2px 9px;white-space:nowrap}
+.b.safe{background:#dafbe1;color:#116329}
+.b.write{background:#ddf4ff;color:#0550ae}
+.b.danger{background:#ffebe9;color:#a40e26}
+.b.mut{background:#eef1f4;color:#59626c}
+details.sub{border:1px solid var(--line);border-radius:10px;margin-top:14px;background:#fafbfc}
+details.sub>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;padding:11px 14px;font-size:14px;font-weight:700}
+details.sub>summary::-webkit-details-marker{display:none}
+details.sub>summary:hover{background:#f2f4f7;border-radius:10px}
+details.sub .cbody{padding:2px 14px 14px}
+label{display:block;margin:14px 0 5px;font-weight:600;font-size:13.5px}
+input[type=text],input[type=password],textarea{width:100%;padding:10px 12px;font-size:15px;border:1px solid var(--line);border-radius:8px;font-family:inherit;background:#fff}
+input[type=text]:focus,input[type=password]:focus,textarea:focus{outline:2px solid #b6d5f5;border-color:var(--blue)}
+textarea{min-height:130px;resize:vertical;white-space:pre;overflow:auto}
+input[type=file]{width:100%;padding:9px;border:1px dashed var(--line);border-radius:8px;background:#fff;font-size:13px}
 .row{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:14px}
-button{margin-top:16px;background:#1f883d;color:#fff;border:0;border-radius:8px;padding:11px 18px;font-size:15px;font-weight:700;cursor:pointer}
-button:disabled{opacity:.6;cursor:default}.hint{color:#6b7280;font-size:13px;margin-top:4px}
-.out{margin-top:14px;padding:11px;border-radius:8px;white-space:pre-wrap;font-size:14px;display:none}
-.ok{background:#eaf6ec;border:1px solid #bfe3c6;color:#1a7f37}.bad{background:#fdecea;border:1px solid #f3c1bb;color:#b42318}
-.danger-card{border-left:4px solid #d1242f}
-select{margin-top:4px;padding:10px 12px;font-size:15px;border:1px solid #d0d7de;border-radius:8px;font-family:inherit}
+.row label{margin:0;font-weight:400}
+.btns{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+button{margin-top:14px;background:var(--green);color:#fff;border:0;border-radius:8px;padding:10px 18px;font-size:14.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 1px rgba(31,35,40,.08)}
+button:hover{background:var(--green-d)}
+button:disabled{opacity:.6;cursor:default}
+.hint{color:var(--mut);font-size:13px;margin-top:6px}
+.out{margin-top:14px;padding:11px 13px;border-radius:8px;white-space:pre-wrap;font-size:14px;display:none;word-break:break-word}
+.ok{background:#eaf6ec;border:1px solid #bfe3c6;color:#1a7f37}
+.bad{background:#fdecea;border:1px solid #f3c1bb;color:#b42318}
+select{margin-top:4px;padding:9px 12px;font-size:14.5px;border:1px solid var(--line);border-radius:8px;font-family:inherit;background:#fff}
 .saout{margin-top:14px;font-size:14px}
-.sasum{margin-bottom:6px;font-size:15px}.sasum b{color:#1f2328}
+.sasum{margin-bottom:6px;font-size:15px}.sasum b{color:var(--txt)}
 .sacols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
-@media(max-width:640px){.sacols{grid-template-columns:1fr}}
-.satab{width:100%;border-collapse:collapse;margin-top:6px;font-size:13px}
-.satab th,.satab td{border-bottom:1px solid #eef1f4;padding:5px 6px;text-align:left;vertical-align:top}
+@media(max-width:640px){.sacols{grid-template-columns:1fr}.cbody{padding:2px 14px 14px}details.card>summary{padding:13px 14px}}
+.satab{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}
+.satab th,.satab td{border-bottom:1px solid #eef1f4;padding:6px;text-align:left;vertical-align:top}
 .satab th{color:#8a929d;font-weight:700}
-.satab td:nth-child(2),.satab th:nth-child(2){text-align:right;white-space:nowrap}</style>
+.satab td:nth-child(2),.satab th:nth-child(2){text-align:right;white-space:nowrap}
+</style>
 </head><body>
-<h1>Сумісні моделі — база</h1>
-<p class="hint">Ключ — значення <b>IMPORT_KEY</b> зі змінних сервісу в Railway. Він нікуди не зберігається.
-Ключ менеджера (<b>MANAGER_KEY</b>) працює лише для розділів 1 і 1б — масові операції (0 і 2) під ним недоступні.</p>
-<label>Ключ (IMPORT_KEY)</label>
-<input id="key" type="password" autocomplete="off" placeholder="встав ключ">
-<div class="row"><input id="keyRemember" type="checkbox"><label style="margin:0;font-weight:400">Запам'ятати ключ у цьому браузері</label></div>
-<div class="hint" id="roleInfo">Ключ не введено.</div>
-
-<div class="card danger-card" id="cardExp" style="display:none">
-  <h2>0) Наповнити з повного експорту (рекомендовано)</h2>
-  <p class="hint">Бере списки з HTML-таблиць у описах: 2 і 3 колонки, «Марка», дужки, індустріальний код.
-  Встав URL повного XML-експорту товарів (з описами). «Замінити все» — повна перезаливка бази.</p>
-  <label>URL повного експорту (XML)</label>
-  <input id="expUrl" type="text" placeholder="https://lartek.com.ua/content/export/....xml">
-  <div class="row"><input id="expReplace" type="checkbox" checked><label style="margin:0;font-weight:400">Замінити все (повна перезаливка)</label></div>
-  <button id="expGo">Залити з експорту</button>
-  <div class="out" id="expOut"></div>
+<div class="top">
+  <h1>Сумісні моделі — база</h1>
+  <p class="sub">Керування списками сумісних моделей для сайту. Розділи розгортаються кліком по заголовку.</p>
+  <label style="margin-top:0">Ключ (IMPORT_KEY)</label>
+  <input id="key" type="password" autocomplete="off" placeholder="встав ключ зі змінних сервісу в Railway">
+  <div class="row"><input id="keyRemember" type="checkbox"><label>Запам'ятати ключ у цьому браузері</label></div>
+  <div class="hint" id="roleInfo">Ключ не введено.</div>
 </div>
 
-<div class="card">
-  <h2>1) Ручне додавання моделей для товару</h2>
-  <p class="hint">Для нового товару: впиши артикул і встав моделі у будь-якому форматі —
-  стовпчиком, через кому або «;». Розпізнається автоматично, дублікати прибираються.
-  Якщо всі моделі одного бренду — впиши його у «Бренд за замовчуванням». Пробіл лишається
-  частиною коду (напр. «WISL 105»). Без дефолтного бренду працює «Бренд Модель» в рядку.</p>
+<div class="grp">Щоденна робота</div>
+
+<details class="card" open>
+  <summary>Забрати моделі з сайту-донора <span class="b write">пише в базу</span><span class="chev">▸</span></summary>
+  <div class="cbody">
+  <p class="hint">Встав <b>посилання на товар донора</b> — по одному в рядку. Сервер сам визначить
+  твій артикул за парт-номером у назві, обійде всі бренди й збере моделі. Якщо артикул не
+  визначиться — впиши його окремим рядком під посиланням. «Лише перевірити» нічого не записує.</p>
+  <label>Товари (посилання на товар донора, по одному в рядку)</label>
+  <textarea id="dList" placeholder="https://donor.example/ua/product-name
+0873
+https://donor.example/ua/inshyi-tovar"></textarea>
+  <div class="row"><input id="dReplace" type="checkbox" checked><label>Замінити наявні моделі цих товарів</label></div>
+  <div class="btns">
+    <button id="dTest" style="background:#57606a">Лише перевірити</button>
+    <button id="dGo">Забрати і залити</button>
+    <button id="dTsv" style="background:#57606a;display:none">Завантажити .tsv</button>
+  </div>
+  <div class="out" id="dOut"></div>
+
+  <details class="sub">
+    <summary>Перевірка зв'язку з донором <span class="b safe">нічого не пише</span><span class="chev">▸</span></summary>
+    <div class="cbody">
+    <p class="hint">Якщо збір не працює — почни звідси: бере одну сторінку товару й показує,
+    чи читаються бренди та моделі, чи потрібен логін і який шлях пошуку працює.</p>
+    <label>Посилання на будь-який товар донора (або його числовий ID)</label>
+    <input id="pbUrl" type="text" placeholder="https://donor.example/ua/tovar-name">
+    <label>Каталожний код для перевірки пошуку (необов'язково)</label>
+    <input id="pbCode" type="text" placeholder="напр. 00144978 — код тієї самої запчастини">
+    <button id="pbGo" style="background:#0969da">Перевірити зв'язок з донором</button>
+    <div class="out" id="pbOut"></div>
+    <div id="pbSteps"></div>
+    </div>
+  </details>
+
+  <details class="sub">
+    <summary>Автопошук за кодом — без посилань <span class="b write">пише лише позначене</span><span class="chev">▸</span></summary>
+    <div class="cbody">
+    <p class="hint">Каталожний код береться з назви товару у фіді («… Bosch <b>00491669</b>») і шукається
+    на донорі. Спершу — звірка: покаже, який товар знайшовся і чи код збігся. У базу підуть лише
+    позначені рядки. <b>Точний</b> збіг позначається сам; <b>слабкий</b> — тільки якщо ти сам
+    поставиш галочку, бо це може бути схожа, але інша деталь.</p>
+    <label>Сайт-донор (потрібен тут, бо кодам нема з чого взяти домен)</label>
+    <input id="dHost" type="text" placeholder="напр. www.service-market.com.ua">
+    <label>Артикули (через кому або рядками)</label>
+    <textarea id="mdSkus" style="min-height:70px" placeholder="0873, 237, 01715"></textarea>
+    <div class="btns">
+      <button id="mdGo">Звірити за кодами</button>
+      <button id="mdMissing" style="background:#57606a">Взяти ті, яких нема в базі</button>
+    </div>
+    <div class="out" id="mdOut"></div>
+    <div id="mdTable"></div>
+    <button id="mdImport" style="display:none">Залити позначені</button>
+    <div class="out" id="mdImpOut"></div>
+    </div>
+  </details>
+  </div>
+</details>
+
+<div class="grp">Додати моделі вручну</div>
+
+<details class="card">
+  <summary>Додати моделі текстом <span class="b write">пише в базу</span><span class="chev">▸</span></summary>
+  <div class="cbody">
+  <p class="hint">Впиши артикул і встав моделі у будь-якому форматі — стовпчиком, через кому
+  або «;». Дублікати прибираються. Якщо всі моделі одного бренду — впиши його у «Бренд за
+  замовчуванням». Пробіл лишається частиною коду (напр. «WISL 105»).</p>
   <label>Артикул товару</label>
   <input id="mSku" type="text" placeholder="напр. 237">
   <label>Бренд за замовчуванням (необов'язково)</label>
@@ -1388,129 +1469,55 @@ select{margin-top:4px;padding:10px 12px;font-size:15px;border:1px solid #d0d7de;
   <textarea id="mText" placeholder="HQ8142, HQ8150, HQ8160
 S1070/04
 WISL 105"></textarea>
-  <div class="row"><input id="mReplace" type="checkbox" checked><label style="margin:0;font-weight:400">Замінити наявні моделі цього товару</label></div>
+  <div class="row"><input id="mReplace" type="checkbox" checked><label>Замінити наявні моделі цього товару</label></div>
   <button id="mGo">Зберегти моделі</button>
   <div class="out" id="mOut"></div>
-</div>
+  </div>
+</details>
 
-<div class="card">
-  <h2>1б) Прикріпити файл з моделями</h2>
-  <p class="hint">Для нового товару: впиши артикул і прикріпи файл. Приймаються .xlsx, .xls, .csv
-  та текст із табуляцією / «;» / комою — формат розпізнається сам. Колонки — за
-  заголовком (Бренд / Модель / Індустріальний код). Без заголовка: 1 колонка = моделі
-  (бренд візьметься за замовчуванням), 2 = Бренд+Модель, 3 = Бренд+Модель+Код.</p>
+<details class="card">
+  <summary>Додати моделі з файлу <span class="b write">пише в базу</span><span class="chev">▸</span></summary>
+  <div class="cbody">
+  <p class="hint">Впиши артикул і прикріпи файл (.xlsx, .xls, .csv або текст) — формат
+  розпізнається сам. Колонки — за заголовком (Бренд / Модель / Індустріальний код).
+  Без заголовка: 1 колонка = моделі, 2 = Бренд+Модель, 3 = Бренд+Модель+Код.</p>
   <label>Артикул товару</label>
   <input id="xSku" type="text" placeholder="напр. 237">
   <label>Бренд за замовчуванням (необов'язково)</label>
   <input id="xBrand" type="text" placeholder="напр. Philips — якщо у файлі лише коди">
   <label>Файл з моделями (.xlsx, .csv або текст)</label>
   <input id="xFile" type="file" accept=".xlsx,.xls,.csv,.txt,.tsv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/plain">
-  <div class="row"><input id="xReplace" type="checkbox" checked><label style="margin:0;font-weight:400">Замінити наявні моделі цього товару</label></div>
+  <div class="row"><input id="xReplace" type="checkbox" checked><label>Замінити наявні моделі цього товару</label></div>
   <button id="xGo">Залити з файлу</button>
   <div class="out" id="xOut"></div>
-</div>
+  </div>
+</details>
 
-<div class="card danger-card" id="cardBak" style="display:none">
-  <h2>Резервна копія бази моделей</h2>
-  <p class="hint">Зроби копію <b>перед</b> будь-яким масовим заливанням. У файл потрапляє вся
-  таблиця сумісності (артикул, бренд, модель, код) — саме те, з чого її можна відновити
-  один-в-один. Зберігай файл у себе на комп'ютері.</p>
-  <button id="bakGo">Завантажити резервну копію (.tsv)</button>
-  <div class="out" id="bakOut"></div>
+<div class="grp">Аналоги й аналітика</div>
 
-  <p class="hint" style="margin-top:18px"><b>Відновлення.</b> Прикріпи раніше збережений файл —
-  уся поточна таблиця буде замінена вмістом файлу. Заливка йде в проміжну таблицю, і робоча
-  замінюється лише в самому кінці, однією дією: якщо зв'язок обірветься посеред процесу,
-  наявні дані не постраждають.</p>
-  <label>Файл резервної копії (.tsv)</label>
-  <p class="hint" style="margin:0 0 6px">Заливай файл таким, як завантажився. Дивитись його в Excel
-  можна, але <b>не перезберігай як .csv</b> — зміниться роздільник (у колонці «код» бувають коми,
-  тому копія робиться через табуляцію), і такий файл відновлення не прийме.</p>
-  <input id="resFile" type="file" accept=".tsv,.txt,text/tab-separated-values,text/plain">
-  <button id="resGo">Відновити з файлу</button>
-  <div class="out" id="resOut"></div>
-</div>
-
-<div class="card">
-  <h2>1в) Забрати моделі зі сторінки донора</h2>
-  <p class="hint">Замість закладки в браузері: <b>просто встав посилання на товар донора</b> —
-  сервер сам визначить твій артикул за парт-номером у назві, обійде всі бренди й збере моделі.
-  Кілька посилань — пачкою. Якщо артикул не визначиться сам (парт-номера нема в назві
-  твого товару) — впиши його <b>окремим рядком під посиланням</b> або в тому ж рядку.
-  Спершу тисни «Лише перевірити» — покаже, що знайшлось, нічого не записуючи.</p>
-  <label>Сайт-донор (необов'язково — береться з посилань; потрібен лише для автопошуку за кодом)</label>
-  <input id="dHost" type="text" placeholder="залиш порожнім, якщо вставляєш посилання">
-
-  <p class="hint" style="margin-top:14px"><b>Почни звідси.</b> Перевірка зв'язку: бере одну сторінку
-  товару донора й показує, чи читаються бренди та моделі, чи потрібен логін і який шлях пошуку
-  працює. Нічого не записує.</p>
-  <label>Посилання на будь-який товар донора (або його числовий ID)</label>
-  <input id="pbUrl" type="text" placeholder="https://donor.example/ua/tovar-name">
-  <label>Каталожний код для перевірки пошуку (необов'язково)</label>
-  <input id="pbCode" type="text" placeholder="напр. 00144978 — код тієї самої запчастини">
-  <button id="pbGo" style="background:#0969da">Перевірити зв'язок з донором</button>
-  <div class="out" id="pbOut"></div>
-  <div id="pbSteps"></div>
-
-  <hr style="border:0;border-top:1px solid #eef1f4;margin:20px 0">
-  <label>Товари (посилання на товар донора, по одному в рядку)</label>
-  <textarea id="dList" placeholder="https://donor.example/ua/product-name
-0873
-https://donor.example/ua/inshyi-tovar"></textarea>
-  <div class="row"><input id="dReplace" type="checkbox" checked><label style="margin:0;font-weight:400">Замінити наявні моделі цих товарів</label></div>
-  <button id="dTest" style="background:#57606a">Лише перевірити</button>
-  <button id="dGo">Забрати і залити</button>
-  <button id="dTsv" style="background:#57606a;display:none">Завантажити .tsv</button>
-  <div class="out" id="dOut"></div>
-
-  <hr style="border:0;border-top:1px solid #eef1f4;margin:20px 0">
-  <h2 style="font-size:15px">Автопошук за кодом — без посилань</h2>
-  <p class="hint">Каталожний код береться з назви товару у фіді («… Bosch <b>00491669</b>») і шукається
-  на донорі. Спершу — звірка: покаже, який товар знайшовся і чи код збігся. У базу підуть лише
-  позначені рядки. <b>Точний</b> збіг (код видно в назві/адресі знайденого товару) позначається сам;
-  <b>слабкий</b> — тільки якщо ти сам поставиш галочку, бо це може бути схожа, але інша деталь.</p>
-  <label>Артикули (через кому або рядками)</label>
-  <textarea id="mdSkus" style="min-height:70px" placeholder="0873, 237, 01715"></textarea>
-  <button id="mdGo">Звірити за кодами</button>
-  <button id="mdMissing" style="background:#57606a">Взяти ті, яких нема в базі</button>
-  <div class="out" id="mdOut"></div>
-  <div id="mdTable"></div>
-  <button id="mdImport" style="display:none">Залити позначені</button>
-  <div class="out" id="mdImpOut"></div>
-</div>
-
-<div class="card">
-  <h2>Аналоги (вручну)</h2>
+<details class="card">
+  <summary>Аналоги (вручну) <span class="b write">пише в базу</span><span class="chev">▸</span></summary>
+  <div class="cbody">
   <p class="hint">Вкладка «Аналоги» на сайті наповнюється сама — за спільними сумісними
   моделями. Тут можна ДОДАТКОВО задати ручні аналоги: вони показуються першими, саме у
-  вказаному порядку, без жодних фільтрів. Зв'язок двосторонній: якщо для 0311 вказати
-  0301 — на сторінці 0301 теж з'явиться 0311 (двічі вносити не треба).</p>
+  вказаному порядку. Зв'язок двосторонній: якщо для 0311 вказати 0301 — на сторінці 0301
+  теж з'явиться 0311.</p>
   <label>Артикул товару</label>
   <input id="anSku" type="text" placeholder="напр. 0311">
-  <button id="anShow">Показати поточні аналоги</button>
+  <button id="anShow" style="background:#57606a">Показати поточні аналоги</button>
   <div class="out" id="anCur"></div>
   <label>Ручні аналоги (через кому, в порядку показу)</label>
   <input id="anList" type="text" placeholder="напр. 0301, 0528">
-  <label>Виключити з аналогів (через кому) — автоматика більше НЕ пропонуватиме ці товари як аналоги (в обидва боки)</label>
+  <label>Виключити з аналогів (через кому) — автоматика більше НЕ пропонуватиме ці товари як аналоги</label>
   <input id="anExcl" type="text" placeholder="напр. 0390 — схожий, але інший обʼєм/розмір">
   <button id="anSave">Зберегти (замінює ручний список і виключення)</button>
   <div class="out" id="anOut"></div>
-</div>
+  </div>
+</details>
 
-<div class="card">
-  <h2>Службове: артикули в базі</h2>
-  <p class="hint">Завантажити список УСІХ артикулів, що вже мають моделі в базі — для звірки
-  з експортом сайту (щоб знайти товари зовсім без даних про сумісність).</p>
-  <button id="skuGo">Завантажити артикули (.txt)</button>
-  <div class="out" id="skuOut"></div>
-  <p class="hint" style="margin-top:16px">Аудит сумісності: по кожному товару — к-ть моделей,
-  бренди і скільки моделей із порожнім брендом («інші»). Для звірки з повним каталогом.</p>
-  <button id="auditGo">Завантажити аудит сумісності (.csv)</button>
-  <div class="out" id="auditOut"></div>
-</div>
-
-<div class="card">
-  <h2>Аналітика пошуку</h2>
+<details class="card">
+  <summary>Аналітика пошуку <span class="b safe">лише читає</span><span class="chev">▸</span></summary>
+  <div class="cbody">
   <p class="hint">Що люди шукають на сайті. «Без результатів» — прямий сигнал попиту:
   шукали, а не знайшли (нема товару або названо інакше).</p>
   <div class="row" style="gap:16px;flex-wrap:wrap;margin-top:0">
@@ -1519,20 +1526,73 @@ https://donor.example/ua/inshyi-tovar"></textarea>
     <span><label>Мінімум повторів</label>
     <select id="saMin"><option value="1">1 (усе)</option><option value="2" selected>2</option><option value="3">3</option><option value="5">5</option></select></span>
   </div>
-  <p class="hint">«Мінімум повторів» відсіює разові одруківки: 2+ = показувати лише те, що шукали кілька разів (реальний попит).</p>
+  <p class="hint">«Мінімум повторів» відсіює разові одруківки: 2+ = лише те, що шукали кілька разів.</p>
   <button id="saGo">Показати</button>
   <div id="saOut"></div>
-</div>
+  </div>
+</details>
 
-<div class="card danger-card" id="cardFeed" style="display:none">
-  <h2>2) Масове наповнення з фіду Horoshop</h2>
+<div class="grp">Службове</div>
+
+<details class="card">
+  <summary>Артикули в базі та аудит <span class="b safe">лише читає</span><span class="chev">▸</span></summary>
+  <div class="cbody">
+  <p class="hint">Список УСІХ артикулів, що вже мають моделі в базі — для звірки з експортом
+  сайту (щоб знайти товари зовсім без даних про сумісність).</p>
+  <button id="skuGo" style="background:#57606a">Завантажити артикули (.txt)</button>
+  <div class="out" id="skuOut"></div>
+  <p class="hint" style="margin-top:16px">Аудит сумісності: по кожному товару — к-ть моделей,
+  бренди і скільки моделей із порожнім брендом («інші»).</p>
+  <button id="auditGo" style="background:#57606a">Завантажити аудит сумісності (.csv)</button>
+  <div class="out" id="auditOut"></div>
+  </div>
+</details>
+
+<details class="card" id="cardBak" style="display:none">
+  <summary>Резервна копія бази моделей <span class="b safe">страховка</span><span class="chev">▸</span></summary>
+  <div class="cbody">
+  <p class="hint">Зроби копію <b>перед</b> будь-яким масовим заливанням. У файл потрапляє вся
+  таблиця сумісності (артикул, бренд, модель, код) — з нього вона відновлюється один-в-один.
+  Зберігай файл у себе на комп'ютері.</p>
+  <button id="bakGo">Завантажити резервну копію (.tsv)</button>
+  <div class="out" id="bakOut"></div>
+  <p class="hint" style="margin-top:18px"><b>Відновлення.</b> Прикріпи раніше збережений файл —
+  уся поточна таблиця буде замінена вмістом файлу. Робоча таблиця замінюється лише в самому
+  кінці, однією дією: обірваний посеред процесу залив її не чіпає.</p>
+  <label>Файл резервної копії (.tsv)</label>
+  <p class="hint" style="margin:0 0 6px">Заливай файл таким, як завантажився. Дивитись його в Excel
+  можна, але <b>не перезберігай як .csv</b> — такий файл відновлення не прийме.</p>
+  <input id="resFile" type="file" accept=".tsv,.txt,text/tab-separated-values,text/plain">
+  <button id="resGo" style="background:#cf222e">Відновити з файлу</button>
+  <div class="out" id="resOut"></div>
+  </div>
+</details>
+
+<details class="card" id="cardExp" style="display:none">
+  <summary>Наповнити з повного експорту <span class="b danger">повна перезаливка</span><span class="chev">▸</span></summary>
+  <div class="cbody">
+  <p class="hint">Бере списки з HTML-таблиць у описах: 2 і 3 колонки, «Марка», дужки,
+  індустріальний код. Встав URL повного XML-експорту товарів (з описами).
+  «Замінити все» — повна перезаливка бази.</p>
+  <label>URL повного експорту (XML)</label>
+  <input id="expUrl" type="text" placeholder="https://lartek.com.ua/content/export/....xml">
+  <div class="row"><input id="expReplace" type="checkbox" checked><label>Замінити все (повна перезаливка)</label></div>
+  <button id="expGo" style="background:#cf222e">Залити з експорту</button>
+  <div class="out" id="expOut"></div>
+  </div>
+</details>
+
+<details class="card" id="cardFeed" style="display:none">
+  <summary>Масове наповнення з фіду Horoshop <span class="b danger">масове</span><span class="chev">▸</span></summary>
+  <div class="cbody">
   <p class="hint">Бере списки з описів фіду. Артикул порожній = весь сайт (~хвилина).</p>
   <label>Артикул товару (необов'язково)</label>
   <input id="sku" type="text" placeholder="напр. 0873 — порожньо = весь сайт">
-  <div class="row"><input id="replace" type="checkbox"><label style="margin:0;font-weight:400">Спершу очистити старі моделі цих товарів</label></div>
+  <div class="row"><input id="replace" type="checkbox"><label>Спершу очистити старі моделі цих товарів</label></div>
   <button id="go">Імпортувати з фіду</button>
   <div class="out" id="out"></div>
-</div>
+  </div>
+</details>
 
 <script>
 function key(){return document.getElementById('key').value.trim();}
@@ -1567,7 +1627,7 @@ function applyRole(role){
   cardFeed.style.display=full?'':'none';
   cardBak.style.display=full?'':'none';
   if(full) roleInfo.textContent='Ключ головний (IMPORT_KEY) — доступні всі розділи.';
-  else if(role==='manager') roleInfo.textContent='Ключ менеджера (MANAGER_KEY) — доступні розділи 1, 1б і 1в. Розділи «0)», «2)» і «Резервна копія бази моделей» під ним сховані: для них потрібен головний ключ IMPORT_KEY.';
+  else if(role==='manager') roleInfo.textContent='Ключ менеджера (MANAGER_KEY) — доступні додавання моделей і збір з донора. Резервна копія та масові наповнення сховані: для них потрібен головний ключ IMPORT_KEY.';
   else roleInfo.textContent=key()?'Ключ не розпізнано — перевір, чи це значення IMPORT_KEY (або MANAGER_KEY) зі змінних сервісу в Railway.':'Ключ не введено.';
 }
 function checkRole(){
@@ -1846,7 +1906,7 @@ pbGo.onclick=function(){
   var url=document.getElementById('pbUrl').value.trim();
   var code=document.getElementById('pbCode').value.trim();
   if(!url){alert('Встав посилання на будь-який товар донора (або його числовий ID)');return;}
-  if(!host&&!/^https?:\\/\\//i.test(url)){alert('Для числового ID впиши домен у поле «Сайт-донор» (з посилання домен береться сам)');return;}
+  if(!host&&!/^https?:\\/\\//i.test(url)){alert('Для числового ID впиши домен у полі «Сайт-донор» (блок «Автопошук за кодом»); з посилання домен береться сам');return;}
   pbGo.disabled=true; pbSteps.innerHTML=''; show(pbOut,'','Перевіряю донора…');
   fetch('/api/donor-probe',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},
     body:JSON.stringify({host:host,url:/^\\d+$/.test(url)?'':url,pid:/^\\d+$/.test(url)?url:'',code:code})})
@@ -1896,7 +1956,7 @@ function mdRender(rows){
 function mdRun(body){
   if(!key()){alert('Введи ключ');return;}
   var host=document.getElementById('dHost').value.trim();
-  if(!host){alert('Для автопошуку впиши сайт-донор угорі розділу (кодам нема з чого взяти домен) — або задай змінну DONOR_HOST');return;}
+  if(!host){alert('Впиши «Сайт-донор» у цьому ж блоці вище (кодам нема з чого взяти домен) — або задай змінну DONOR_HOST');return;}
   mdGo.disabled=true;mdMissing.disabled=true;mdTable.innerHTML='';mdImport.style.display='none';
   show(mdOut,'','Шукаю на донорі… Це може тривати кілька хвилин — не закривай сторінку.');
   fetch('/api/match-donor',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},
