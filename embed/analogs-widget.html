@@ -27,6 +27,17 @@
   var API='';
   var SHOW=4;      // скільки карток показувати одразу
   var FETCH=12;    // скільки кандидатів перевіряти
+  // ── Два запобіжники (обидва вимкнені на прохання власника) ──
+  // Аналоги наповнюються вручну — через поле «Аналог» у картці товару Horoshop.
+  //
+  // ONLY_MOUNT=1: віджет працює ЛИШЕ там, де явно вставлено
+  //   <div class="lartek-analogs-mount">. Без неї він не чіпає вкладку
+  //   «Аналоги» — не перезаписує її вміст і не ховає її. Саме це зберігає
+  //   ручні аналоги, вписані в Horoshop. Повернути захоплення вкладки — 0.
+  // AUTO=0: авто-підбір за спільними сумісними моделями вимкнено (надто багато
+  //   нерелевантних збігів); ручні аналоги з /admin показуються. Повернути — 1.
+  var ONLY_MOUNT=1;
+  var AUTO=0;
 
   var isRu=/^\/ru(\/|$)/.test(location.pathname);
   var T=isRu
@@ -164,6 +175,10 @@
   function boot(){
     var mount=document.querySelector('.lartek-analogs-mount'), found=null;
     if(!mount){
+      // Без явної точки монтування віджет не робить НІЧОГО: не шукає вкладку
+      // «Аналоги», не стирає її вміст і не ховає її. Це головне — вкладку
+      // Horoshop власник наповнює вручну через поле «Аналог» у картці товару.
+      if(ONLY_MOUNT) return;
       found=findTab();
       if(found){
         mount=document.createElement('div');
@@ -194,6 +209,7 @@
               var h=cards[String(it.sku)]; if(!h) return;
               if(cur&&cur.url&&h.url&&h.url===cur.url) return;                      // не сам товар
               if(it.manual){ man.push({h:h}); return; }                             // ручні — без фільтрів, як задав власник
+              if(!AUTO) return;                                                      // авто-підбір вимкнено (див. AUTO вгорі)
               if(cur&&cur.category&&h.category&&h.category!==cur.category) return;  // авто — лише та сама категорія
               if(cur&&conflicting(cur.name,h.name)) return;                          // різний обʼєм/розмір у назві — не аналог
               auto.push({h:h,shared:it.shared});
