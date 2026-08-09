@@ -27,6 +27,10 @@
   var API='';
   var SHOW=4;      // скільки карток показувати одразу
   var FETCH=12;    // скільки кандидатів перевіряти
+  // Авто-підбір аналогів (за спільними сумісними моделями) вимкнено на прохання
+  // власника: надто багато нерелевантних збігів. Показуємо ЛИШЕ ручні аналоги,
+  // задані в /admin. Щоб повернути автопідбір — поставити 1.
+  var AUTO=0;
 
   var isRu=/^\/ru(\/|$)/.test(location.pathname);
   var T=isRu
@@ -194,6 +198,7 @@
               var h=cards[String(it.sku)]; if(!h) return;
               if(cur&&cur.url&&h.url&&h.url===cur.url) return;                      // не сам товар
               if(it.manual){ man.push({h:h}); return; }                             // ручні — без фільтрів, як задав власник
+              if(!AUTO) return;                                                      // авто-підбір вимкнено (див. AUTO вгорі)
               if(cur&&cur.category&&h.category&&h.category!==cur.category) return;  // авто — лише та сама категорія
               if(cur&&conflicting(cur.name,h.name)) return;                          // різний обʼєм/розмір у назві — не аналог
               auto.push({h:h,shared:it.shared});
