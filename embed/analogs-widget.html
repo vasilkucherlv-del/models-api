@@ -117,6 +117,14 @@
     if(f.tab) f.tab.style.display='none';
     if(f.panel) f.panel.style.display='none';
   }
+  // Заголовок вкладки, що відповідає панелі (href="#id" ↔ data-content-id="id").
+  function tabFor(panel){
+    var id=(panel&&panel.getAttribute)?panel.getAttribute('data-content-id'):'';
+    if(!id) return null;
+    var tt=document.querySelectorAll('.product-heading__tab');
+    for(var i=0;i<tt.length;i++) if((tt[i].getAttribute('href')||'')==='#'+id) return tt[i];
+    return null;
+  }
 
   // Чи товару немає в наявності (працює на обох версіях — розмітка schema.org).
   function outOfStock(){
@@ -216,6 +224,14 @@
   // ── запуск ──
   function boot(){
     var mount=document.querySelector('.lartek-analogs-mount'), found=null;
+    if(mount){
+      // Без цього вкладка встигала блимнути: Horoshop малює її одразу з HTML,
+      // а ми ховали/переносили вміст уже після відповіді API. Якщо у вкладці
+      // лежить ЛИШЕ наша точка монтування (тексту власника немає) — ховаємо
+      // її негайно. Назад покажемо в paint(), якщо справді малюватимемо там.
+      var pnl0=mount.closest?mount.closest('[data-content-id]'):null;
+      if(pnl0 && !norm2(pnl0.textContent)) hideTab({panel:pnl0, tab:tabFor(pnl0)});
+    }
     if(!mount){
       found=findTab();
       if(found){
@@ -363,6 +379,12 @@
   }
   function paint(mount,list){
     if(!connected(mount)) return;
+    // Малюємо у вкладці, яку сховали заздалегідь, — повертаємо її на місце.
+    var pnl=mount.closest?mount.closest('[data-content-id]'):null;
+    if(pnl && pnl.style.display==='none'){
+      pnl.style.display='';
+      var t=tabFor(pnl); if(t) t.style.display='';
+    }
     css();
     var html='<div class="la-wrap">';
     list.slice(0,SHOW).forEach(function(x){ html+=card(x.h); });
