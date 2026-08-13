@@ -402,18 +402,31 @@ app.get('/api/cards', limiter, async (req, res) => {
 
 // === Аналоги товару: РУЧНІ (задані власником) + АВТО (спільні моделі) ===
 // GET /api/analogs?sku=0311 → { count, items:[{sku, manual, shared, own}] }
-// Ручні — першими, у заданому порядку; зв'язок двосторонній (A↔B з одного запису).
+// Ручні — першими; зв'язок груповий: усі товари одного списку бачать один одного.
 // Авто: shared — спільні моделі (мін. 3, або всі — якщо у товару їх менше трьох).
 app.get('/api/analogs', limiter, async (req, res) => {
   try {
     const sku = String(req.query.sku || '').trim();
     if (!sku) return res.status(400).json({ error: 'sku_required' });
-    // ручні: прямий напрям за pos, зворотний — після нього
+    // Ручні аналоги — ГРУПОЮ. Якщо власник для якоря A задав B, C, D, то це
+    // взаємозамінні товари, тож на сторінці B мають бути і A, і C, і D, а не
+    // лише якір. Тому беремо всі якорі, у чиїх списках є наш товар (плюс сам
+    // товар як можливий якір), і повертаємо об'єднання їхніх списків.
     const man = await pool.query(
-      `SELECT analog_sku AS sku, 0 AS dir, pos FROM analogs_manual WHERE sku = $1
-       UNION ALL
-       SELECT sku AS sku, 1 AS dir, pos FROM analogs_manual WHERE analog_sku = $1
-       ORDER BY dir, pos`,
+      `WITH anchors AS (
+         SELECT sku FROM analogs_manual WHERE analog_sku = $1
+         UNION
+         SELECT $1::text
+       ), grp AS (
+         SELECT m.analog_sku AS sku, m.pos AS pos
+           FROM analogs_manual m JOIN anchors a ON m.sku = a.sku
+         UNION ALL
+         SELECT a.sku AS sku, -1 AS pos FROM anchors a
+       )
+       SELECT sku, MIN(pos) AS pos
+         FROM grp WHERE sku <> $1
+        GROUP BY sku
+        ORDER BY MIN(pos), sku`,
       [sku]
     );
     // виключення (в обидва боки): автоматиці ці пари пропонувати заборонено
