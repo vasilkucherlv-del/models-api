@@ -135,8 +135,16 @@
       if(e.querySelector && e.querySelector('button,a')) continue;   // беремо саму кнопку, не обгортку
       btn=e; break;
     }
-    if(!btn||!btn.closest) return null;
-    var h=btn.closest('.product-order, .product-card__purchase, .product-card__order, .product-order__row, .product-card__buy-button');
+    if(!btn) return null;
+    // Беремо НАЙВЕРХНІШИЙ контейнер покупки, а не найближчий: на мобільному
+    // найближчий (.product-card__buy-button) лежить у flex-рядку, і блок
+    // ставав його сусідом — виїжджав праворуч за межі екрана.
+    var SEL='.product-order, .product-card__purchase, .product-order__row, .product-card__order, .product-card__buy-button';
+    var h=null, n=btn.parentElement;
+    while(n && n!==document.body){
+      if(n.matches && n.matches(SEL)) h=n;
+      n=n.parentElement;
+    }
     if(!h) h=btn.parentElement;
     return (h&&h.parentNode)?h:null;
   }
@@ -279,7 +287,7 @@
     st.textContent=''
       +'.la-wrap{font-family:Arial,Helvetica,sans-serif}'
       +'.la-block{margin:18px 0;font-family:Arial,Helvetica,sans-serif}'
-      +'.la-near{margin:14px 0 4px}'
+      +'.la-near{margin:14px 0 4px;width:100%;max-width:100%;flex:1 1 100%;box-sizing:border-box}'
       +'.la-tgl{display:flex;align-items:center;gap:10px;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;'
       +'border:1px solid #dfe3ea;border-radius:12px;padding:12px 14px;background:#fff;box-shadow:0 1px 3px rgba(15,30,60,.06)}'
       +'.la-tgl.la-open{border-radius:12px 12px 0 0}'
