@@ -173,11 +173,36 @@
     return true;
   }
 
+  // Чи товару немає в наявності (працює на обох версіях — розмітка schema.org).
+  function outOfStock(){
+    var a=document.querySelector('[itemprop="availability"]');
+    var h=a?(a.getAttribute('href')||a.getAttribute('content')||''):'';
+    return /OutOfStock|SoldOut|Discontinued/i.test(h);
+  }
+  // Контейнер кнопки «Повідомити, коли з'явиться». Клас j-widget-favorites-add
+  // однаковий і на десктопі, і на мобільному — тому гачок один.
+  function notifyHost(){
+    // Клас j-widget-favorites-add носить і сердечко «В бажання», і кнопка
+    // сповіщення — тому шукаємо саме за текстом, серед ВИДИМИХ елементів.
+    var all=document.querySelectorAll('.j-widget-favorites-add, button, a'), btn=null;
+    for(var i=0;i<all.length;i++){
+      var e=all[i];
+      if(e.offsetParent===null) continue;
+      if(!/повідом|сообщ/i.test(e.textContent||'')) continue;
+      if(e.querySelector && e.querySelector('button,a')) continue;   // беремо саму кнопку, не обгортку
+      btn=e; break;
+    }
+    if(!btn||!btn.closest) return null;
+    var h=btn.closest('.product-order, .product-card__purchase, .product-card__order, .product-order__row, .product-card__buy-button');
+    if(!h) h=btn.parentElement;
+    return (h&&h.parentNode)?h:null;
+  }
+
   // Мобільний шаблон Horoshop НЕ рендерить кастомні вкладки (немає жодного
   // .product-heading__tab). Тоді створюємо ВЛАСНИЙ блок «Аналоги» у стилі
   // мобільної теми — одразу після блоку «Сумісні моделі» (або після опису).
   // Блок вставляється лише при render(), тож без аналогів нічого не з'являється.
-  function insertOwnBlock(mount,list){
+  function insertOwnBlock(mount,list,openNow){
     var sec=document.createElement('div'); sec.className='product__block la-block';
     // Заголовок-«кнопка», зрозумілий покупцю: іконка, назва з кількістю, пояснення,
     // міні-фото товарів усередині і стрілка. За замовчуванням ЗГОРНУТО.
@@ -206,6 +231,18 @@
       var a=hd.querySelector('.la-arr'); if(a) a.innerHTML=open?'&#9662;':'&#9652;';
     };
     sec.appendChild(hd); sec.appendChild(inner);
+    // Товару НЕМАЄ в наявності: ставимо блок одразу під «Повідомити, коли
+    // з'явиться» — там, де покупець вирішує піти, — і ОДРАЗУ РОЗГОРНУТИМ.
+    if(openNow){
+      var nh=notifyHost();
+      if(nh){
+        inner.style.display=''; hd.classList.add('la-open');
+        var ar=hd.querySelector('.la-arr'); if(ar) ar.innerHTML='&#9652;';
+        sec.className='product__block la-block la-near';
+        nh.parentNode.insertBefore(sec, nh.nextSibling);
+        return true;
+      }
+    }
     // Десктоп без вкладки «Аналоги»: блок одразу ПІД секцією вкладок. Розкладок
     // може бути кілька (дублі під різну ширину) — беремо видиму (offsetParent).
     var navs=document.querySelectorAll('.product-heading__nav'), nav=null;
@@ -292,6 +329,7 @@
     st.textContent=''
       +'.la-wrap{font-family:Arial,Helvetica,sans-serif}'
       +'.la-block{margin:18px 0;font-family:Arial,Helvetica,sans-serif}'
+      +'.la-near{margin:14px 0 4px}'
       +'.la-tgl{display:flex;align-items:center;gap:10px;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;'
       +'border:1px solid #dfe3ea;border-radius:12px;padding:12px 14px;background:#fff;box-shadow:0 1px 3px rgba(15,30,60,.06)}'
       +'.la-tgl.la-open{border-radius:12px 12px 0 0}'
@@ -328,12 +366,43 @@
       +'<div class="la-price">'+T.price(h.price)+'</div></div>';
   }
   function render(mount,list,found){
+    // Товару НЕМАЄ в наявності — аналоги мають бути там, де покупець вирішує
+    // піти: одразу під «Повідомити, коли з'явиться». Це важливіше за вкладку,
+    // тому пробуємо перед нею — і вкладку тоді взагалі не чіпаємо.
+    // Блок покупки на десктопі домальовується темою пізніше за наш старт,
+    // тому чекаємо на нього кілька спроб, а вже потім відступаємо до вкладки.
+    if(outOfStock()){
+      // Якщо точка монтування вже стоїть у вкладці — переносимо блок звідти,
+      // а вкладку, що спорожніла, ховаємо, щоб не лишалась пуста.
+      var origPanel=(connected(mount)&&mount.closest)?mount.closest('[data-content-id]'):null;
+      var tries=8;
+      var again=function(){
+        if(insertOwnBlock(mount,list,true)){
+          if(found) hideTab(found);
+          else if(origPanel && !norm2(origPanel.textContent)){
+            origPanel.style.display='none';
+            var id=origPanel.getAttribute('data-content-id'), tl=document.querySelectorAll('.product-heading__tab');
+            for(var q=0;q<tl.length;q++) if((tl[q].getAttribute('href')||'')==='#'+id) tl[q].style.display='none';
+          }
+          paint(mount,list); return;
+        }
+        if(--tries>0){ setTimeout(again,500); return; }
+        place(mount,list,found); paint(mount,list);
+      };
+      again(); return;
+    }
+    place(mount,list,found); paint(mount,list);
+  }
+  function place(mount,list,found){
     // Вкладку Horoshop забираємо ТІЛЬКИ тут — коли є що показати.
     if(found && found.panel && !connected(mount)){
       found.panel.innerHTML=''; found.panel.appendChild(mount);
       found.panel.style.display=''; if(found.tab) found.tab.style.display='';
     }
-    if(!connected(mount) && !insertOwnTab(mount) && !insertOwnBlock(mount,list)) return;
+    if(!connected(mount)) { insertOwnTab(mount) || insertOwnBlock(mount,list); }
+  }
+  function paint(mount,list){
+    if(!connected(mount)) return;
     css();
     var html='<div class="la-wrap">';
     list.slice(0,SHOW).forEach(function(x){ html+=card(x.h); });
