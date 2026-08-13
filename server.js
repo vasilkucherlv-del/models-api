@@ -2268,6 +2268,62 @@ app.get('/api/export', async (req, res) => {
   }
 });
 
+// === Аналоги у вигляді таблиці для SalesDrive ===
+// GET /api/analogs.csv — ті самі колонки, що в Google-таблиці
+// «SalesDrive — Аналоги (якір + аналоги-заміни)», щоб CRM могла тягнути
+// файл за посиланням і не доводилось вводити аналоги двічі.
+// Ключ не потрібен: це той самий перелік, що й так видно на сайті.
+async function namesFor(skus) {
+  const out = {};
+  for (let i = 0; i < skus.length; i += 20) {          // Meili: до 20 запитів за раз
+    const part = skus.slice(i, i + 20);
+    const queries = part.map((sk) => ({
+      indexUid: 'products', q: '"' + sk.replace(/"/g, '') + '"', limit: 20,
+      attributesToSearchOn: ['sku'], attributesToRetrieve: ['sku', 'name'],
+    }));
+    try {
+      const r = await fetch(CATALOG_HOST + '/multi-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CATALOG_KEY },
+        body: JSON.stringify({ queries }),
+      });
+      const d = await r.json();
+      const rs = (d && d.results) || [];
+      part.forEach((sk, k) => {
+        const hit = ((rs[k] && rs[k].hits) || []).find((h) => String(h.sku) === sk);
+        if (hit) out[sk] = hit.name || '';
+      });
+    } catch (e) { /* назви — не критично, лишиться порожньо */ }
+  }
+  return out;
+}
+function csvCell(v) {
+  const s = String(v == null ? '' : v);
+  return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+app.get('/api/analogs.csv', limiter, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT sku, analog_sku, pos FROM analogs_manual ORDER BY sku, pos, analog_sku'
+    );
+    const skus = [...new Set(rows.flatMap((r) => [r.sku, r.analog_sku]))];
+    const names = await namesFor(skus);
+    const head = ['Код якоря', 'Назва якоря (точно як в SalesDrive)', 'Код аналога', 'Назва аналога', 'Примітка (необов\'язково)'];
+    const lines = [head.join(';')];
+    for (const r of rows) {
+      lines.push([r.sku, names[r.sku] || '', r.analog_sku, names[r.analog_sku] || '', ''].map(csvCell).join(';'));
+    }
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', 'inline; filename="analogs.csv"');
+    res.set('Cache-Control', 'public, max-age=300');
+    res.set('Access-Control-Allow-Origin', '*');
+    res.send('\ufeff' + lines.join('\n'));          // BOM — щоб Excel не ламав кирилицю
+  } catch (e) {
+    console.error(e);
+    res.status(500).send('server_error');
+  }
+});
+
 init()
   .then(() => app.listen(PORT, () => console.log('API на порту ' + PORT)))
   .catch((e) => { console.error('Помилка ініціалізації БД:', e); process.exit(1); });
