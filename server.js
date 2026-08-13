@@ -1383,6 +1383,15 @@ select{margin-top:4px;padding:9px 12px;font-size:14.5px;border:1px solid var(--l
 .satab th,.satab td{border-bottom:1px solid #eef1f4;padding:6px;text-align:left;vertical-align:top}
 .satab th{color:#8a929d;font-weight:700}
 .satab td:nth-child(2),.satab th:nth-child(2){text-align:right;white-space:nowrap}
+.anrow{display:flex;align-items:center;gap:8px;margin-top:8px}
+.anrow input[type=text]{flex:0 1 200px;min-width:0}
+.anname{flex:1 1 220px;color:var(--mut);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.anname.miss{color:var(--red)}
+.andel{margin-top:0;flex:none;background:#eef1f4;color:#59626c;padding:9px 13px;line-height:1;font-size:16px}
+.andel:hover{background:#e2e6ea}
+#anAdd{background:var(--blue)}
+#anAdd:hover{background:#0757ba}
+@media(max-width:640px){.anrow{flex-wrap:wrap}.anname{flex:1 1 100%;order:3;margin-left:2px}}
 </style>
 </head><body>
 <div class="top">
@@ -1498,17 +1507,17 @@ WISL 105"></textarea>
 <details class="card">
   <summary>Аналоги (вручну) <span class="b write">пише в базу</span><span class="chev">▸</span></summary>
   <div class="cbody">
-  <p class="hint">Вкладка «Аналоги» на сайті наповнюється сама — за спільними сумісними
-  моделями. Тут можна ДОДАТКОВО задати ручні аналоги: вони показуються першими, саме у
-  вказаному порядку. Зв'язок двосторонній: якщо для 0311 вказати 0301 — на сторінці 0301
-  теж з'явиться 0311.</p>
-  <label>Артикул товару</label>
+  <p class="hint">Автопідбір аналогів вимкнено — на сайті показуються ЛИШЕ ті, що задані
+  тут. Порядок клітинок = порядок показу. Зв'язок двосторонній: якщо для 0311 вказати
+  0301 — на сторінці 0301 теж з'явиться 0311.</p>
+  <label>Артикул товару (якір)</label>
   <input id="anSku" type="text" placeholder="напр. 0311">
   <button id="anShow" style="background:#57606a">Показати поточні аналоги</button>
   <div class="out" id="anCur"></div>
-  <label>Ручні аналоги (через кому, в порядку показу)</label>
-  <input id="anList" type="text" placeholder="напр. 0301, 0528">
-  <label>Виключити з аналогів (через кому) — автоматика більше НЕ пропонуватиме ці товари як аналоги</label>
+  <label>Аналоги — по одному в клітинці</label>
+  <div id="anRows"></div>
+  <button id="anAdd" type="button">+ додати аналог</button>
+  <label>Виключити з аналогів (через кому) — знадобиться, лише якщо колись увімкнути автопідбір назад</label>
   <input id="anExcl" type="text" placeholder="напр. 0390 — схожий, але інший обʼєм/розмір">
   <button id="anSave">Зберегти (замінює ручний список і виключення)</button>
   <div class="out" id="anOut"></div>
@@ -2048,10 +2057,54 @@ auditGo.onclick=function(){
 };
 
 // ── Аналоги (вручну) ──
-var anSku=document.getElementById('anSku'),anList=document.getElementById('anList');
+var anSku=document.getElementById('anSku');
 var anShow=document.getElementById('anShow'),anSave=document.getElementById('anSave');
 var anCur=document.getElementById('anCur'),anOut=document.getElementById('anOut');
 var anExcl=document.getElementById('anExcl');
+var anRows=document.getElementById('anRows'),anAdd=document.getElementById('anAdd');
+
+// Кожен аналог — окрема клітинка. «+» додає ще одну, «×» прибирає.
+// Після вводу артикула поруч показується назва товару — щоб одразу було видно
+// одруківку (артикула немає в каталозі — підпис червоніє).
+function anName(inp,lab){
+  var v=inp.value.trim();
+  lab.textContent=''; lab.className='anname';
+  if(!v) return;
+  fetch('/api/cards?skus='+encodeURIComponent(v))
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(inp.value.trim()!==v) return;               // встигли змінити — не чіпаємо
+      var c=((d&&d.cards)||[])[0];
+      if(c){ lab.textContent=c.name||''; }
+      else { lab.textContent='немає такого артикула'; lab.className='anname miss'; }
+    }).catch(function(){});
+}
+function anAddRow(v){
+  var d=document.createElement('div'); d.className='anrow';
+  var i=document.createElement('input'); i.type='text'; i.placeholder='артикул аналога'; i.value=v||'';
+  var n=document.createElement('span'); n.className='anname';
+  var x=document.createElement('button'); x.type='button'; x.className='andel'; x.title='Прибрати'; x.textContent='×';
+  x.onclick=function(){ d.remove(); if(!anRows.children.length) anAddRow(''); };
+  i.onchange=function(){ anName(i,n); };
+  i.onkeydown=function(e){
+    if(e.key==='Enter'){ e.preventDefault(); anName(i,n); anAddRow('').querySelector('input').focus(); }
+  };
+  d.appendChild(i); d.appendChild(n); d.appendChild(x);
+  anRows.appendChild(d);
+  if(v) anName(i,n);
+  return d;
+}
+function anGet(){
+  return [].slice.call(anRows.querySelectorAll('input'))
+    .map(function(i){return i.value.trim();}).filter(Boolean);
+}
+function anSet(list){
+  anRows.innerHTML='';
+  (list||[]).forEach(function(v){ anAddRow(v); });
+  anAddRow('');                                      // завжди одна порожня напоготові
+}
+anAdd.onclick=function(){ anAddRow('').querySelector('input').focus(); };
+anSet([]);
 anShow.onclick=function(){
   var s=anSku.value.trim();
   if(!key()||!s){show(anCur,'bad','Вкажи ключ і артикул.');return;}
@@ -2068,7 +2121,7 @@ anShow.onclick=function(){
       +'\\nВиключені (не аналоги): '+((m.exclude&&m.exclude.length)?m.exclude.join(', '):'—')
       +'\\nАвто (зі спільних моделей): '+(auto.length?auto.join(', '):'—');
     show(anCur,'ok',t);
-    anList.value=(m.direct||[]).join(', ');
+    anSet(m.direct||[]);
     anExcl.value=(m.exclude||[]).join(', ');
   }).catch(function(e){show(anCur,'bad','Помилка: '+e.message);})
     .finally(function(){anShow.disabled=false;});
@@ -2077,7 +2130,7 @@ anSave.onclick=function(){
   var s=anSku.value.trim();
   if(!key()||!s){show(anOut,'bad','Вкажи ключ і артикул.');return;}
   function splitIds(v){return v.split(/[,;]/).map(function(x){return x.trim();}).filter(Boolean);}
-  var list=splitIds(anList.value), excl=splitIds(anExcl.value);
+  var list=anGet(), excl=splitIds(anExcl.value);
   anSave.disabled=true; show(anOut,'','Зберігаю…');
   fetch('/api/analogs-manual',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},body:JSON.stringify({sku:s,analogs:list,exclude:excl})})
     .then(function(r){return r.json();})
