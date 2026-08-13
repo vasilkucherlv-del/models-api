@@ -11,14 +11,17 @@
   2) Бере артикул з meta[itemprop=sku], питає models-api /api/analogs?sku=…,
      картки (назва, фото, ціна, наявність) — з /api/cards.
   3) Куди малює:
-     - десктоп: у вкладку «Аналоги», якщо вона є; інакше власним блоком під
-       вкладками;
-     - мобільний: власним блоком (мобільний шаблон Horoshop кастомних вкладок
-       не рендерить узагалі).
-  4) НІЧОГО не показує і нічого не чіпає, якщо ручних аналогів немає. Вкладку,
-     знайдену за назвою, забирає ЛИШЕ в render() — тобто коли справді є що
-     показати. Це навмисно: вкладку «Аналоги» власник може наповнювати вручну
-     через поле «Аналог» у картці Horoshop, і цей вміст стирати не можна.
+     - товару НЕМАЄ в наявності — одразу під «Повідомити, коли з'явиться»,
+       розгорнутим (і на десктопі, і на мобільному);
+     - інакше у вкладку «Аналоги», ЯКЩО вона є на сторінці. Вкладку створює
+       сам Horoshop, коли в картці товару заповнене поле «Аналог» — впишіть
+       туди будь-який текст. Скрипт вкладок НЕ створює: рідна вкладка
+       малюється разом зі сторінкою, без стрибка розмітки;
+     - якщо вкладки немає — власним блоком під вкладками (мобільний шаблон
+       кастомних вкладок не рендерить узагалі, там завжди блок).
+  4) НІЧОГО не показує і нічого не чіпає, якщо ручних аналогів немає. Вкладку
+     забирає ЛИШЕ в render() — коли справді є що показати, — щоб не стерти
+     текст, вписаний власником у поле «Аналог».
   5) Явна точка монтування <div class="lartek-analogs-mount"> теж підтримується.
 
   Роздача: GET /analogs.js (server.js бере вміст тегу скрипта і підставляє
@@ -37,10 +40,10 @@
 
   var isRu=/^\/ru(\/|$)/.test(location.pathname);
   var T=isRu
-    ? {code:'Код: ', ok:'В наличии', off:'Нет в наличии', more:'Показать ещё', empty:'Аналоги для этого товара пока не добавлены.', tab:'Аналоги',
+    ? {code:'Код: ', ok:'В наличии', off:'Нет в наличии', more:'Показать ещё', empty:'Аналоги для этого товара пока не добавлены.',
        tglTitle:function(n){return 'Есть '+n+' '+plural(n,'аналог','аналога','аналогов');}, tglFrom:'от ',
        price:function(p){return p?fmt(p)+' грн':'цена по запросу';}}
-    : {code:'Код: ', ok:'В наявності', off:'Немає в наявності', more:'Показати ще', empty:'Аналоги для цього товару поки не додані.', tab:'Аналоги',
+    : {code:'Код: ', ok:'В наявності', off:'Немає в наявності', more:'Показати ще', empty:'Аналоги для цього товару поки не додані.',
        tglTitle:function(n){return 'Є '+n+' '+plural(n,'аналог','аналоги','аналогів');}, tglFrom:'від ',
        price:function(p){return p?fmt(p)+' грн':'ціна за запитом';}};
   function plural(n,one,few,many){
@@ -115,64 +118,6 @@
     if(f.panel) f.panel.style.display='none';
   }
 
-  // ДЕСКТОП: додаємо власну вкладку «Аналоги» просто в ряд вкладок теми, щоб
-  // аналоги були там, де їх шукає покупець, а не окремим блоком під описом.
-  // Нічого в картці Horoshop заповнювати не треба. Викликається лише з render(),
-  // тобто коли є що показати. Мобільний шаблон вкладок не має — там false і
-  // спрацьовує власний блок нижче.
-  function insertOwnTab(mount){
-    var navs=document.querySelectorAll('.product-heading__nav'), nav=null;
-    for(var i=0;i<navs.length;i++){ if(navs[i].offsetParent!==null){ nav=navs[i]; break; } }
-    if(!nav) return false;
-    var tabs=nav.querySelectorAll('.product-heading__tab');
-    if(!tabs.length) return false;
-    var sample=null, all0=document.querySelectorAll('[data-content-id]');
-    for(var s0=0;s0<all0.length;s0++){
-      var cid=all0[s0].getAttribute('data-content-id')||'';
-      if(cid.indexOf('popup')<0 && all0[s0].parentNode){ sample=all0[s0]; break; }
-    }
-    if(!sample) return false;
-    var ID='lartek-analogs';
-    if(document.querySelector('[data-content-id="'+ID+'"]')) return false;
-
-    var panel=document.createElement('div');
-    panel.className=sample.className;                 // ті самі класи, що в теми
-    panel.setAttribute('data-content-id', ID);
-    panel.style.display='none';
-    var sec=document.createElement('div'); sec.className='product__section';
-    var txt=document.createElement('div'); txt.className='text';
-    txt.appendChild(mount); sec.appendChild(txt); panel.appendChild(sec);
-    sample.parentNode.appendChild(panel);
-
-    var tab=document.createElement('a');
-    tab.className='product-heading__tab'; tab.href='#'+ID;
-    var ttl=document.createElement('div'); ttl.className='product-heading__title'; ttl.textContent=T.tab;
-    tab.appendChild(ttl);
-    var after=null;                                    // після «Сумісні моделі», якщо така є
-    for(var j=0;j<tabs.length;j++){ if(/сум[іи]сн|совместим/i.test(tabs[j].textContent)) after=tabs[j]; }
-    if(after&&after.nextSibling) nav.insertBefore(tab, after.nextSibling); else nav.appendChild(tab);
-
-    function hideOthers(){
-      var all=panel.parentNode.children;
-      for(var k=0;k<all.length;k++){
-        if(all[k]!==panel && all[k].hasAttribute && all[k].hasAttribute('data-content-id')) all[k].style.display='none';
-      }
-    }
-    tab.addEventListener('click', function(e){
-      e.preventDefault();
-      hideOthers(); panel.style.display='';
-      var tt=nav.querySelectorAll('.product-heading__tab');
-      for(var q=0;q<tt.length;q++) tt[q].classList.remove('is-active');
-      tab.classList.add('is-active');
-    });
-    for(var z=0;z<tabs.length;z++){          // клік по чужій вкладці — ховаємо нашу
-      tabs[z].addEventListener('click', function(){
-        panel.style.display='none'; tab.classList.remove('is-active');
-      });
-    }
-    return true;
-  }
-
   // Чи товару немає в наявності (працює на обох версіях — розмітка schema.org).
   function outOfStock(){
     var a=document.querySelector('[itemprop="availability"]');
@@ -180,10 +125,8 @@
     return /OutOfStock|SoldOut|Discontinued/i.test(h);
   }
   // Контейнер кнопки «Повідомити, коли з'явиться». Клас j-widget-favorites-add
-  // однаковий і на десктопі, і на мобільному — тому гачок один.
+  // носить і сердечко «В бажання», тому шукаємо саме за текстом кнопки.
   function notifyHost(){
-    // Клас j-widget-favorites-add носить і сердечко «В бажання», і кнопка
-    // сповіщення — тому шукаємо саме за текстом, серед ВИДИМИХ елементів.
     var all=document.querySelectorAll('.j-widget-favorites-add, button, a'), btn=null;
     for(var i=0;i<all.length;i++){
       var e=all[i];
@@ -408,7 +351,7 @@
       found.panel.innerHTML=''; found.panel.appendChild(mount);
       found.panel.style.display=''; if(found.tab) found.tab.style.display='';
     }
-    if(!connected(mount)) { insertOwnTab(mount) || insertOwnBlock(mount,list); }
+    if(!connected(mount)) insertOwnBlock(mount,list);
   }
   function paint(mount,list){
     if(!connected(mount)) return;
