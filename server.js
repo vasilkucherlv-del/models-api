@@ -369,8 +369,14 @@ app.get('/api/cards', limiter, async (req, res) => {
       if (c && now - c.t < 5 * 60 * 1000) bySku[s] = c.card; else need.push(s);
     }
     if (need.length) {
+      // Шукаємо ТІЛЬКИ по полю sku і беремо запас результатів.
+      // Інакше товар без наявності губиться: перше правило ранжування індексу —
+      // instock:desc, тож товари «в наявності» з випадковим збігом цифр стають
+      // вище потрібного, а limit:1 віддавав саме їх (артикул не сходився —
+      // картка вважалась відсутньою, і аналог не показувався на сайті).
       const queries = need.map(s => ({
-        indexUid: 'products', q: '"' + s.replace(/"/g, '') + '"', limit: 1,
+        indexUid: 'products', q: '"' + s.replace(/"/g, '') + '"', limit: 20,
+        attributesToSearchOn: ['sku'],
         attributesToRetrieve: ['sku', 'name', 'price', 'url', 'picture', 'available', 'category'],
       }));
       const r = await fetch(CATALOG_HOST + '/multi-search', {
@@ -381,8 +387,8 @@ app.get('/api/cards', limiter, async (req, res) => {
       const d = await r.json();
       const rs = (d && d.results) || [];
       need.forEach((s, i) => {
-        const h = rs[i] && rs[i].hits && rs[i].hits[0];
-        const card = (h && String(h.sku) === s) ? h : null;
+        const hits = (rs[i] && rs[i].hits) || [];
+        const card = hits.find(h => String(h.sku) === s) || null;
         _cardCache.set(s, { t: now, card });
         bySku[s] = card;
       });
