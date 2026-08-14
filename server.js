@@ -1552,7 +1552,8 @@ WISL 105"></textarea>
   що в таблиці. Таблиця має бути відкрита за посиланням (доступ «читач»).</p>
   <div class="btns">
     <button id="shDiff" style="background:#57606a">Показати, що зміниться</button>
-    <button id="shApply">Підтягнути з таблиці</button>
+    <button id="shMerge" style="background:#0969da">Додати з таблиці (нічого не стирати)</button>
+    <button id="shApply">Замінити під таблицю</button>
   </div>
   <div class="out" id="shOut"></div>
   </div>
@@ -2091,18 +2092,19 @@ auditGo.onclick=function(){
 };
 
 // ── Аналоги з Google-таблиці ──
-var shDiff=document.getElementById('shDiff'), shApply=document.getElementById('shApply'), shOut=document.getElementById('shOut');
-function shRun(apply){
+var shDiff=document.getElementById('shDiff'), shApply=document.getElementById('shApply'),
+    shMerge=document.getElementById('shMerge'), shOut=document.getElementById('shOut');
+function shRun(apply, merge){
   if(!key()){show(shOut,'bad','Вкажи ключ.');return;}
-  shDiff.disabled=true; shApply.disabled=true;
-  show(shOut,'', apply?'Підтягую…':'Дивлюсь…');
+  shDiff.disabled=true; shApply.disabled=true; shMerge.disabled=true;
+  show(shOut,'', apply?'Працюю…':'Дивлюсь…');
   fetch('/api/analogs-from-sheet',{method:'POST',
     headers:{'Content-Type':'application/json','X-Import-Key':key()},
-    body:JSON.stringify({apply:!!apply})})
+    body:JSON.stringify({apply:!!apply, merge:!!merge})})
     .then(function(r){return r.json();})
     .then(function(d){
       if(!d||d.error){show(shOut,'bad','Помилка: '+((d&&d.error)||'server'));return;}
-      var t=(d.застосовано?'ЗАСТОСОВАНО. ':'Поки нічого не змінено. ')
+      var t=(d.застосовано?'ЗАСТОСОВАНО. ':'Поки нічого не змінено. ')+'Режим: '+d.режим+'. '
         +'У таблиці пар: '+d.уТаблиці+', якорів: '+d.якорів
         +'\\nДодасться ('+d.додасться.length+'): '+(d.додасться.length?d.додасться.join(', '):'—')
         +'\\nЗникне ('+d.зникне.length+'): '+(d.зникне.length?d.зникне.join(', '):'—');
@@ -2113,10 +2115,11 @@ function shRun(apply){
       show(shOut, (d.немаєВКаталозі&&d.немаєВКаталозі.length)?'bad':'ok', t);
     })
     .catch(function(e){show(shOut,'bad','Помилка: '+e.message);})
-    .finally(function(){shDiff.disabled=false; shApply.disabled=false;});
+    .finally(function(){shDiff.disabled=false; shApply.disabled=false; shMerge.disabled=false;});
 }
-shDiff.onclick=function(){shRun(false);};
-shApply.onclick=function(){shRun(true);};
+shDiff.onclick=function(){shRun(false,false);};
+shMerge.onclick=function(){shRun(true,true);};
+shApply.onclick=function(){shRun(true,false);};
 
 // ── Аналоги (вручну) ──
 var anSku=document.getElementById('anSku');
@@ -2370,6 +2373,9 @@ app.post('/api/analogs-from-sheet', async (req, res) => {
   // це масова операція, вона стирає ручні аналоги, яких немає в таблиці.
   if (!hasManagerKey(req)) return res.status(403).json({ error: 'bad_key' });
   const apply = !!(req.body && req.body.apply);
+  // merge — додати рядки з таблиці, НІЧОГО не стираючи (для разового перенесення).
+  // Без нього apply переписує список під таблицю повністю.
+  const merge = !!(req.body && req.body.merge);
   if (apply && !hasFullKey(req)) return res.status(403).json({ error: 'need_full_key' });
   try {
     const pairs = await pairsFromSheet();
@@ -2385,15 +2391,16 @@ app.post('/api/analogs-from-sheet', async (req, res) => {
     const unknown = skus.filter((s) => !names[s]);
 
     const out = {
+      режим: merge ? 'додати, нічого не стирати' : 'замінити під таблицю',
       уТаблиці: pairs.length, якорів: new Set(pairs.map((x) => x.sku)).size,
-      додасться: added, зникне: removed, немаєВКаталозі: unknown,
+      додасться: added, зникне: merge ? [] : removed, немаєВКаталозі: unknown,
       застосовано: false, копіяПопередніх: cur.map(keyOf),
     };
     if (apply) {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        await client.query('DELETE FROM analogs_manual');
+        if (!merge) await client.query('DELETE FROM analogs_manual');
         for (const x of pairs) {
           await client.query(
             'INSERT INTO analogs_manual (sku, analog_sku, pos) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
@@ -2441,9 +2448,9 @@ async function namesFor(skus) {
   }
   return out;
 }
-function csvCell(v) {
+function csvCell(v, sep) {
   const s = String(v == null ? '' : v);
-  return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  return (s.indexOf(sep) >= 0 || /["\n]/.test(s)) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 app.get('/api/analogs.csv', limiter, async (req, res) => {
   try {
@@ -2452,10 +2459,15 @@ app.get('/api/analogs.csv', limiter, async (req, res) => {
     );
     const skus = [...new Set(rows.flatMap((r) => [r.sku, r.analog_sku]))];
     const names = await namesFor(skus);
+    // ?sep=, — для формули IMPORTDATA у Google Таблицях: вона ділить клітинки
+    // лише комою або табуляцією, крапку з комою не розуміє. Типово ; — так
+    // файл коректно відкривається в Excel.
+    const sep = String(req.query.sep || ';') === ',' ? ',' : ';';
     const head = ['Код якоря', 'Назва якоря (точно як в SalesDrive)', 'Код аналога', 'Назва аналога', 'Примітка (необов\'язково)'];
-    const lines = [head.join(';')];
+    const lines = [head.map((h) => csvCell(h, sep)).join(sep)];
     for (const r of rows) {
-      lines.push([r.sku, names[r.sku] || '', r.analog_sku, names[r.analog_sku] || '', ''].map(csvCell).join(';'));
+      lines.push([r.sku, names[r.sku] || '', r.analog_sku, names[r.analog_sku] || '', '']
+        .map((v) => csvCell(v, sep)).join(sep));
     }
     res.set('Content-Type', 'text/csv; charset=utf-8');
     res.set('Content-Disposition', 'inline; filename="analogs.csv"');
