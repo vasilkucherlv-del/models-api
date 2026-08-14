@@ -1544,6 +1544,21 @@ WISL 105"></textarea>
 </details>
 
 <details class="card">
+  <summary>Аналоги з Google-таблиці <span class="b write">пише в базу</span><span class="chev">▸</span></summary>
+  <div class="cbody">
+  <p class="hint">Таблиця «SalesDrive — Аналоги (якір + аналоги-заміни)» — головна.
+  Заповнюєте її, тут натискаєте «Підтягнути» — сайт стає таким самим. Спершу
+  подивіться, що зміниться: підтягування ЗАМІНЮЄ ручні аналоги на сайті тими,
+  що в таблиці. Таблиця має бути відкрита за посиланням (доступ «читач»).</p>
+  <div class="btns">
+    <button id="shDiff" style="background:#57606a">Показати, що зміниться</button>
+    <button id="shApply">Підтягнути з таблиці</button>
+  </div>
+  <div class="out" id="shOut"></div>
+  </div>
+</details>
+
+<details class="card">
   <summary>Аналітика пошуку <span class="b safe">лише читає</span><span class="chev">▸</span></summary>
   <div class="cbody">
   <p class="hint">Що люди шукають на сайті. «Без результатів» — прямий сигнал попиту:
@@ -2075,6 +2090,34 @@ auditGo.onclick=function(){
     .finally(function(){auditGo.disabled=false;});
 };
 
+// ── Аналоги з Google-таблиці ──
+var shDiff=document.getElementById('shDiff'), shApply=document.getElementById('shApply'), shOut=document.getElementById('shOut');
+function shRun(apply){
+  if(!key()){show(shOut,'bad','Вкажи ключ.');return;}
+  shDiff.disabled=true; shApply.disabled=true;
+  show(shOut,'', apply?'Підтягую…':'Дивлюсь…');
+  fetch('/api/analogs-from-sheet',{method:'POST',
+    headers:{'Content-Type':'application/json','X-Import-Key':key()},
+    body:JSON.stringify({apply:!!apply})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(!d||d.error){show(shOut,'bad','Помилка: '+((d&&d.error)||'server'));return;}
+      var t=(d.застосовано?'ЗАСТОСОВАНО. ':'Поки нічого не змінено. ')
+        +'У таблиці пар: '+d.уТаблиці+', якорів: '+d.якорів
+        +'\\nДодасться ('+d.додасться.length+'): '+(d.додасться.length?d.додасться.join(', '):'—')
+        +'\\nЗникне ('+d.зникне.length+'): '+(d.зникне.length?d.зникне.join(', '):'—');
+      if(d.немаєВКаталозі&&d.немаєВКаталозі.length)
+        t+='\\nУВАГА, немає в каталозі (перевір коди в таблиці): '+d.немаєВКаталозі.join(', ');
+      if(d.зникне.length&&!d.застосовано)
+        t+='\\n\\nЩоб не втратити те, що зникне, — допишіть ці пари в таблицю ДО підтягування.';
+      show(shOut, (d.немаєВКаталозі&&d.немаєВКаталозі.length)?'bad':'ok', t);
+    })
+    .catch(function(e){show(shOut,'bad','Помилка: '+e.message);})
+    .finally(function(){shDiff.disabled=false; shApply.disabled=false;});
+}
+shDiff.onclick=function(){shRun(false);};
+shApply.onclick=function(){shRun(true);};
+
 // ── Аналоги (вручну) ──
 var anSku=document.getElementById('anSku');
 var anShow=document.getElementById('anShow'),anSave=document.getElementById('anSave');
@@ -2265,6 +2308,163 @@ app.get('/api/export', async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// === Підтягування аналогів з Google-таблиці ===
+// Таблиця «SalesDrive — Аналоги (якір + аналоги-заміни)» — ЄДИНЕ місце вводу.
+// Сервер читає її CSV-експорт і переписує ручні аналоги під неї.
+// Таблиця має бути доступна за посиланням («Усі, хто має посилання — читач»).
+const SHEET_ID  = process.env.ANALOGS_SHEET_ID || '1S9DN1lNw7wanmJSHCOY9l3dQ9plSBnEPGHWreK_p20c';
+const SHEET_URL = process.env.ANALOGS_SHEET_URL ||
+  ('https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/export?format=csv');
+
+// Розбір CSV з урахуванням лапок і роздільника ; або ,
+function parseCsv(text) {
+  const t = String(text || '').replace(/^\ufeff/, '');
+  const head = (t.split(/\r?\n/)[0] || '');
+  const sep = (head.split(';').length > head.split(',').length) ? ';' : ',';
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (q) {
+      if (c === '"') { if (t[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+      else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === sep) { row.push(cell); cell = ''; }
+    else if (c === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
+    else if (c !== '\r') cell += c;
+  }
+  if (cell.length || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some((x) => String(x).trim()));
+}
+
+// Читає таблицю → [{sku, analog_sku, pos}]
+async function pairsFromSheet() {
+  const r = await fetch(SHEET_URL, { redirect: 'follow' });
+  if (!r.ok) throw new Error('Таблиця недоступна (HTTP ' + r.status + '). Відкрийте доступ за посиланням.');
+  const text = await r.text();
+  if (/<html/i.test(text.slice(0, 200))) throw new Error('Замість таблиці прийшла сторінка входу — відкрийте доступ за посиланням.');
+  const rows = parseCsv(text);
+  if (!rows.length) throw new Error('Таблиця порожня.');
+  const head = rows[0].map((h) => String(h).toLowerCase().trim());
+  const iA = head.findIndex((h) => h.indexOf('якор') >= 0 && h.indexOf('назва') < 0);
+  const iB = head.findIndex((h) => h.indexOf('аналог') >= 0 && h.indexOf('назва') < 0);
+  if (iA < 0 || iB < 0) throw new Error('Не знайдено колонок «Код якоря» і «Код аналога».');
+  const out = [], seen = new Set(); const posOf = {};
+  for (const row of rows.slice(1)) {
+    const a = String(row[iA] || '').trim(), b = String(row[iB] || '').trim();
+    if (!a || !b || a === b) continue;
+    const key = a + '|' + b;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    posOf[a] = (posOf[a] == null ? 0 : posOf[a] + 1);
+    out.push({ sku: a, analog_sku: b, pos: posOf[a] });
+  }
+  return out;
+}
+
+// POST /api/analogs-from-sheet  {apply:true}  (без apply — лише показує різницю)
+app.post('/api/analogs-from-sheet', async (req, res) => {
+  // Показати різницю може й менеджер; ПЕРЕЗАПИС — лише під головним ключем:
+  // це масова операція, вона стирає ручні аналоги, яких немає в таблиці.
+  if (!hasManagerKey(req)) return res.status(403).json({ error: 'bad_key' });
+  const apply = !!(req.body && req.body.apply);
+  if (apply && !hasFullKey(req)) return res.status(403).json({ error: 'need_full_key' });
+  try {
+    const pairs = await pairsFromSheet();
+    const cur = (await pool.query('SELECT sku, analog_sku FROM analogs_manual')).rows;
+    const keyOf = (x) => x.sku + '|' + x.analog_sku;
+    const curSet = new Set(cur.map(keyOf)), newSet = new Set(pairs.map(keyOf));
+    const added = pairs.filter((x) => !curSet.has(keyOf(x))).map(keyOf);
+    const removed = cur.filter((x) => !newSet.has(keyOf(x))).map(keyOf);
+
+    // коди, яких немає в каталозі — щоб одруківка в таблиці не пройшла тихо
+    const skus = [...new Set(pairs.flatMap((x) => [x.sku, x.analog_sku]))];
+    const names = await namesFor(skus);
+    const unknown = skus.filter((s) => !names[s]);
+
+    const out = {
+      уТаблиці: pairs.length, якорів: new Set(pairs.map((x) => x.sku)).size,
+      додасться: added, зникне: removed, немаєВКаталозі: unknown,
+      застосовано: false, копіяПопередніх: cur.map(keyOf),
+    };
+    if (apply) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM analogs_manual');
+        for (const x of pairs) {
+          await client.query(
+            'INSERT INTO analogs_manual (sku, analog_sku, pos) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
+            [x.sku, x.analog_sku, x.pos]
+          );
+        }
+        await client.query('COMMIT');
+        out.застосовано = true;
+      } catch (e) { await client.query('ROLLBACK'); throw e; }
+      finally { client.release(); }
+    }
+    return res.json(out);
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: e.message || 'server_error' });
+  }
+});
+
+// === Аналоги у вигляді таблиці для SalesDrive ===
+// GET /api/analogs.csv — ті самі колонки, що в Google-таблиці
+// «SalesDrive — Аналоги (якір + аналоги-заміни)», щоб CRM могла тягнути
+// файл за посиланням і не доводилось вводити аналоги двічі.
+// Ключ не потрібен: це той самий перелік, що й так видно на сайті.
+async function namesFor(skus) {
+  const out = {};
+  for (let i = 0; i < skus.length; i += 20) {          // Meili: до 20 запитів за раз
+    const part = skus.slice(i, i + 20);
+    const queries = part.map((sk) => ({
+      indexUid: 'products', q: '"' + sk.replace(/"/g, '') + '"', limit: 20,
+      attributesToSearchOn: ['sku'], attributesToRetrieve: ['sku', 'name'],
+    }));
+    try {
+      const r = await fetch(CATALOG_HOST + '/multi-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CATALOG_KEY },
+        body: JSON.stringify({ queries }),
+      });
+      const d = await r.json();
+      const rs = (d && d.results) || [];
+      part.forEach((sk, k) => {
+        const hit = ((rs[k] && rs[k].hits) || []).find((h) => String(h.sku) === sk);
+        if (hit) out[sk] = hit.name || '';
+      });
+    } catch (e) { /* назви — не критично, лишиться порожньо */ }
+  }
+  return out;
+}
+function csvCell(v) {
+  const s = String(v == null ? '' : v);
+  return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+app.get('/api/analogs.csv', limiter, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT sku, analog_sku, pos FROM analogs_manual ORDER BY sku, pos, analog_sku'
+    );
+    const skus = [...new Set(rows.flatMap((r) => [r.sku, r.analog_sku]))];
+    const names = await namesFor(skus);
+    const head = ['Код якоря', 'Назва якоря (точно як в SalesDrive)', 'Код аналога', 'Назва аналога', 'Примітка (необов\'язково)'];
+    const lines = [head.join(';')];
+    for (const r of rows) {
+      lines.push([r.sku, names[r.sku] || '', r.analog_sku, names[r.analog_sku] || '', ''].map(csvCell).join(';'));
+    }
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', 'inline; filename="analogs.csv"');
+    res.set('Cache-Control', 'public, max-age=300');
+    res.set('Access-Control-Allow-Origin', '*');
+    res.send('\ufeff' + lines.join('\n'));          // BOM — щоб Excel не ламав кирилицю
+  } catch (e) {
+    console.error(e);
+    res.status(500).send('server_error');
   }
 });
 
