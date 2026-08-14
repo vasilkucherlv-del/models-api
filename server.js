@@ -2457,7 +2457,31 @@ app.get('/api/analogs.csv', limiter, async (req, res) => {
     const { rows } = await pool.query(
       'SELECT sku, analog_sku, pos FROM analogs_manual ORDER BY sku, pos, analog_sku'
     );
-    const skus = [...new Set(rows.flatMap((r) => [r.sku, r.analog_sku]))];
+    // Розгортаємо ГРУПАМИ — так само, як /api/analogs для сайту. Інакше СРМ
+    // бачила лише сирі пари: у якоря 01288 було три аналоги, а в 02329 — один
+    // (тільки зворотний звʼязок), хоча це один набір взаємозамінних товарів.
+    const direct = new Map();          // якір -> [аналоги за порядком]
+    const anchorsOf = new Map();       // товар -> [якорі, у чиїх списках він є]
+    for (const r of rows) {
+      if (!direct.has(r.sku)) direct.set(r.sku, []);
+      direct.get(r.sku).push(r.analog_sku);
+      if (!anchorsOf.has(r.analog_sku)) anchorsOf.set(r.analog_sku, []);
+      anchorsOf.get(r.analog_sku).push(r.sku);
+    }
+    const all = [...new Set(rows.flatMap((r) => [r.sku, r.analog_sku]))];
+    const pairsOut = [];
+    for (const x of all) {
+      const anchors = [...new Set([...(anchorsOf.get(x) || []), x])];
+      const group = [];
+      for (const a of anchors) {
+        if (a !== x && !group.includes(a)) group.push(a);            // сам якір
+        for (const b of (direct.get(a) || [])) {                     // його список
+          if (b !== x && !group.includes(b)) group.push(b);
+        }
+      }
+      for (const y of group) pairsOut.push({ sku: x, analog_sku: y });
+    }
+    const skus = all;
     const names = await namesFor(skus);
     // ?sep=, — для формули IMPORTDATA у Google Таблицях: вона ділить клітинки
     // лише комою або табуляцією, крапку з комою не розуміє. Типово ; — так
@@ -2465,7 +2489,7 @@ app.get('/api/analogs.csv', limiter, async (req, res) => {
     const sep = String(req.query.sep || ';') === ',' ? ',' : ';';
     const head = ['Код якоря', 'Назва якоря (точно як в SalesDrive)', 'Код аналога', 'Назва аналога', 'Примітка (необов\'язково)'];
     const lines = [head.map((h) => csvCell(h, sep)).join(sep)];
-    for (const r of rows) {
+    for (const r of pairsOut) {
       lines.push([r.sku, names[r.sku] || '', r.analog_sku, names[r.analog_sku] || '', '']
         .map((v) => csvCell(v, sep)).join(sep));
     }
