@@ -2441,9 +2441,9 @@ async function namesFor(skus) {
   }
   return out;
 }
-function csvCell(v) {
+function csvCell(v, sep) {
   const s = String(v == null ? '' : v);
-  return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  return (s.indexOf(sep) >= 0 || /["\n]/.test(s)) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 app.get('/api/analogs.csv', limiter, async (req, res) => {
   try {
@@ -2452,10 +2452,15 @@ app.get('/api/analogs.csv', limiter, async (req, res) => {
     );
     const skus = [...new Set(rows.flatMap((r) => [r.sku, r.analog_sku]))];
     const names = await namesFor(skus);
+    // ?sep=, — для формули IMPORTDATA у Google Таблицях: вона ділить клітинки
+    // лише комою або табуляцією, крапку з комою не розуміє. Типово ; — так
+    // файл коректно відкривається в Excel.
+    const sep = String(req.query.sep || ';') === ',' ? ',' : ';';
     const head = ['Код якоря', 'Назва якоря (точно як в SalesDrive)', 'Код аналога', 'Назва аналога', 'Примітка (необов\'язково)'];
-    const lines = [head.join(';')];
+    const lines = [head.map((h) => csvCell(h, sep)).join(sep)];
     for (const r of rows) {
-      lines.push([r.sku, names[r.sku] || '', r.analog_sku, names[r.analog_sku] || '', ''].map(csvCell).join(';'));
+      lines.push([r.sku, names[r.sku] || '', r.analog_sku, names[r.analog_sku] || '', '']
+        .map((v) => csvCell(v, sep)).join(sep));
     }
     res.set('Content-Type', 'text/csv; charset=utf-8');
     res.set('Content-Disposition', 'inline; filename="analogs.csv"');
