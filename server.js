@@ -508,7 +508,16 @@ app.post('/api/analogs-manual', async (req, res) => {
     const list = clean(req.body.analogs);
     const hasExclude = Array.isArray(req.body.exclude);
     const excl = clean(req.body.exclude);
+    // detach: повністю відвʼязати товар — стерти і зворотні записи (де він
+    // вписаний аналогом в інших товарів), інакше через групи він показується далі
+    const detach = req.body.detach === true;
     await client.query('BEGIN');
+    let detached = 0;
+    if (detach) {
+      const r = await client.query(
+        'DELETE FROM analogs_manual WHERE analog_sku = $1', [sku]);
+      detached = r.rowCount;
+    }
     await client.query('DELETE FROM analogs_manual WHERE sku = $1', [sku]);
     for (let i = 0; i < list.length; i++) {
       await client.query(
@@ -524,7 +533,8 @@ app.post('/api/analogs-manual', async (req, res) => {
       }
     }
     await client.query('COMMIT');
-    res.json({ ok: true, saved: list.length, excluded: hasExclude ? excl.length : undefined });
+    res.json({ ok: true, saved: list.length, excluded: hasExclude ? excl.length : undefined,
+               detached: detach ? detached : undefined });
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
     console.error(e);
@@ -1539,6 +1549,9 @@ WISL 105"></textarea>
   <label>Виключити з аналогів (через кому) — знадобиться, лише якщо колись увімкнути автопідбір назад</label>
   <input id="anExcl" type="text" placeholder="напр. 0390 — схожий, але інший обʼєм/розмір">
   <button id="anSave">Зберегти (замінює ручний список і виключення)</button>
+  <button id="anClear" type="button" style="background:#b91c1c">Очистити всі аналоги цього товару</button>
+  <p class="hint">«Очистити» повністю виводить товар із групи аналогів: стирає і його
+  список, і згадки про нього в інших товарах. Виключення не чіпає.</p>
   <div class="out" id="anOut"></div>
   </div>
 </details>
@@ -2124,6 +2137,7 @@ shApply.onclick=function(){shRun(true,false);};
 // ── Аналоги (вручну) ──
 var anSku=document.getElementById('anSku');
 var anShow=document.getElementById('anShow'),anSave=document.getElementById('anSave');
+var anClear=document.getElementById('anClear');
 var anCur=document.getElementById('anCur'),anOut=document.getElementById('anOut');
 var anExcl=document.getElementById('anExcl');
 var anRows=document.getElementById('anRows'),anAdd=document.getElementById('anAdd');
@@ -2215,6 +2229,21 @@ anSave.onclick=function(){
     })
     .catch(function(e){show(anOut,'bad','Помилка: '+e.message);})
     .finally(function(){anSave.disabled=false;});
+};
+anClear.onclick=function(){
+  var s=anSku.value.trim();
+  if(!key()||!s){show(anOut,'bad','Вкажи ключ і артикул.');return;}
+  if(!confirm('Прибрати ВСІ аналоги товару '+s+' (і з інших товарів теж)?')) return;
+  anClear.disabled=true; show(anOut,'','Очищаю…');
+  fetch('/api/analogs-manual',{method:'POST',headers:{'Content-Type':'application/json','X-Import-Key':key()},body:JSON.stringify({sku:s,analogs:[],detach:true})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(!d||d.error){show(anOut,'bad','Помилка: '+((d&&d.error)||'server')+((d&&d.error)==='bad_key'?' (невірний ключ)':''));return;}
+      anSet([]);
+      show(anOut,'ok','Очищено. Прибрано згадок в інших товарах: '+(d.detached||0)+'.');
+    })
+    .catch(function(e){show(anOut,'bad','Помилка: '+e.message);})
+    .finally(function(){anClear.disabled=false;});
 };
 
 // ── Аналітика пошуку ──
