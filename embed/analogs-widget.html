@@ -113,9 +113,23 @@
     }
     return null;
   }
+  // Ховаємо, запамʼятовуючи попередній inline-display, і повертаємо ЛИШЕ те,
+  // що ховали самі. Вмикати панелі напряму не можна: тема тримає неактивні
+  // панелі вкладок через display:none, і зняте нами "none" показувало вміст
+  // вкладки «Аналоги» просто під «Описом» (панелі в DOM лежать одна під одною).
   function hideTab(f){
-    if(f.tab) f.tab.style.display='none';
-    if(f.panel) f.panel.style.display='none';
+    hideEl(f.tab); hideEl(f.panel);
+  }
+  function hideEl(el){
+    if(!el || el.getAttribute('data-la-hid')) return;
+    el.setAttribute('data-la-hid','1');
+    el.setAttribute('data-la-prev', el.style.display||'');
+    el.style.display='none';
+  }
+  function unhideEl(el){
+    if(!el || !el.getAttribute('data-la-hid')) return;
+    el.style.display=el.getAttribute('data-la-prev')||'';
+    el.removeAttribute('data-la-hid'); el.removeAttribute('data-la-prev');
   }
   // Заголовок вкладки, що відповідає панелі (href="#id" ↔ data-content-id="id").
   function tabFor(panel){
@@ -373,18 +387,17 @@
     // Вкладку Horoshop забираємо ТІЛЬКИ тут — коли є що показати.
     if(found && found.panel && !connected(mount)){
       found.panel.innerHTML=''; found.panel.appendChild(mount);
-      found.panel.style.display=''; if(found.tab) found.tab.style.display='';
+      unhideEl(found.panel); unhideEl(found.tab);
     }
     if(!connected(mount)) insertOwnBlock(mount,list);
   }
   function paint(mount,list){
     if(!connected(mount)) return;
-    // Малюємо у вкладці, яку сховали заздалегідь, — повертаємо її на місце.
+    // Вкладку, яку ховали заздалегідь (анти-блимання), повертаємо на місце.
+    // Лише ту, що ховали САМІ: панелі неактивних вкладок тема тримає через
+    // display:none, і чіпати їх не можна.
     var pnl=mount.closest?mount.closest('[data-content-id]'):null;
-    if(pnl && pnl.style.display==='none'){
-      pnl.style.display='';
-      var t=tabFor(pnl); if(t) t.style.display='';
-    }
+    if(pnl){ unhideEl(pnl); unhideEl(tabFor(pnl)); }
     css();
     var html='<div class="la-wrap">';
     list.slice(0,SHOW).forEach(function(x){ html+=card(x.h); });
