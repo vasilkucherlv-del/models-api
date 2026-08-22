@@ -377,7 +377,7 @@ app.get('/api/cards', limiter, async (req, res) => {
       const queries = need.map(s => ({
         indexUid: 'products', q: '"' + s.replace(/"/g, '') + '"', limit: 20,
         attributesToSearchOn: ['sku'],
-        attributesToRetrieve: ['sku', 'name', 'price', 'url', 'picture', 'available', 'category'],
+        attributesToRetrieve: ['id', 'sku', 'name', 'price', 'url', 'picture', 'available', 'category'],
       }));
       const r = await fetch(CATALOG_HOST + '/multi-search', {
         method: 'POST',

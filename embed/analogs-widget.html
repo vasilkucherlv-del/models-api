@@ -44,11 +44,13 @@
        tglTitle:function(n){return 'Есть '+n+' '+plural(n,'аналог','аналога','аналогов');}, tglFrom:'от ',
        oosAvail:'✓ Этот товар закончился, но есть замена в наличии',
        oosAny:'Аналоги этого товара',
+       buy:'Купить', inCart:'В корзине ✓',
        price:function(p){return p?fmt(p)+' грн':'цена по запросу';}}
     : {code:'Код: ', ok:'В наявності', off:'Немає в наявності', more:'Показати ще', empty:'Аналоги для цього товару поки не додані.',
        tglTitle:function(n){return 'Є '+n+' '+plural(n,'аналог','аналоги','аналогів');}, tglFrom:'від ',
        oosAvail:'✓ Цей товар закінчився, але є заміна в наявності',
        oosAny:'Аналоги цього товару',
+       buy:'Купити', inCart:'У кошику ✓',
        price:function(p){return p?fmt(p)+' грн':'ціна за запитом';}};
   function plural(n,one,few,many){
     var m10=n%10,m100=n%100;
@@ -358,20 +360,43 @@
       +'.la-name:hover,.la-name:focus{text-decoration:underline;border:0;border-bottom:0;box-shadow:none;background-image:none}'
       +'.la-name:hover{text-decoration:underline}'
       +'.la-av{font-size:12px}.la-av.ok{color:#1d9d55}.la-av.off{color:#d92d20}'
-      +'.la-price{flex:0 0 auto;font-size:15px;font-weight:bold;color:#111;background:#f4f6f9;border-radius:8px;padding:8px 12px;white-space:nowrap}'
+      +'.la-right{flex:0 0 auto;display:flex;flex-direction:column;align-items:stretch;gap:6px}'
+      +'.la-price{flex:0 0 auto;font-size:15px;font-weight:bold;color:#111;background:#f4f6f9;border-radius:8px;padding:8px 12px;white-space:nowrap;text-align:center}'
+      +'.la-buy{display:block;border:none;border-radius:8px;background:#9e2b33;color:#fff;padding:8px 12px;font-size:13.5px;font-weight:bold;cursor:pointer;white-space:nowrap}'
+      +'.la-buy:hover{background:#872027}'
+      +'.la-buy-done{background:#9e9e9e;cursor:default}'
+      +'.la-buy-done:hover{background:#9e9e9e}'
       +'.la-off .la-name{color:#5b6b8c}.la-off .la-img{opacity:.55}'
       +'.la-more{display:block;width:100%;border:1px solid #d5dbe4;background:#fff;border-radius:8px;padding:9px;cursor:pointer;font-size:13px;color:#16408f}'
       +'.la-empty{font-size:13px;color:#8a94a6;padding:8px 0}'
-      +'@media(max-width:520px){.la-img,.la-ph{width:64px;height:64px;flex-basis:64px}.la-price{font-size:14px;padding:6px 9px}}';
+      +'@media(max-width:520px){.la-img,.la-ph{width:64px;height:64px;flex-basis:64px}.la-price{font-size:14px;padding:6px 9px}.la-buy{font-size:12.5px;padding:7px 9px}}';
     document.head.appendChild(st);
   }
   function card(h){
     var img=h.picture?('<img class="la-img" loading="lazy" src="'+thumb(h.picture,168)+'" alt="" onerror="this.outerHTML=\'<div class=la-ph>—</div>\'">'):'<div class="la-ph">—</div>';
     var av=h.available?('<span class="la-av ok">'+T.ok+'</span>'):('<span class="la-av off">'+T.off+'</span>');
+    // «Купити» — лише коли товар у наявності і відомий внутрішній id Horoshop
+    // (без нього кошику нічого передати — тоді лишається перехід на сторінку).
+    var buy=(h.available&&h.id)
+      ? '<button type="button" class="la-buy" data-laid="'+esc(h.id)+'" data-url="'+esc(h.url||'')+'">'+T.buy+'</button>' : '';
     return '<div class="la-card'+(h.available?'':' la-off')+'">'+img
       +'<div class="la-mid"><div class="la-code">'+T.code+esc(h.sku)+'</div>'
       +'<a class="la-name" href="'+esc(h.url||'#')+'">'+esc(h.name)+'</a>'+av+'</div>'
-      +'<div class="la-price">'+T.price(h.price)+'</div></div>';
+      +'<div class="la-right"><div class="la-price">'+T.price(h.price)+'</div>'+buy+'</div></div>';
+  }
+  // Додати в кошик рідним механізмом теми Horoshop — так само, як її кнопка
+  // «Купити»: AjaxCart.appendProduct({type:'product',...}). Якщо кошика на
+  // сторінці немає — чесний фолбек: перехід на сторінку аналога.
+  function buyClick(btn){
+    try{
+      if(window.AjaxCart&&window.AjaxCart.getInstance){
+        window.AjaxCart.openCartOnAdd=true;
+        window.AjaxCart.getInstance().appendProduct({type:'product',quantity:1,id:String(btn.getAttribute('data-laid'))},[]);
+        btn.textContent=T.inCart; btn.classList.add('la-buy-done'); btn.disabled=true;
+        return;
+      }
+    }catch(e){}
+    var u=btn.getAttribute('data-url'); if(u) location.href=u;
   }
   function render(mount,list,found){
     // Товару НЕМАЄ в наявності — аналоги мають бути там, де покупець вирішує
@@ -422,6 +447,16 @@
     if(list.length>SHOW) html+='<button type="button" class="la-more">'+T.more+' ('+(list.length-SHOW)+')</button>';
     html+='</div>';
     mount.innerHTML=html;
+    // Кнопки «Купити» — делегуванням (картки перемальовуються, слухач один)
+    if(!mount.__laBuy){
+      mount.__laBuy=1;
+      mount.addEventListener('click',function(e){
+        var b=e.target&&e.target.closest?e.target.closest('.la-buy'):null;
+        if(!b||b.disabled) return;
+        e.preventDefault(); e.stopPropagation();
+        buyClick(b);
+      });
+    }
     var btn=mount.querySelector('.la-more');
     if(btn) btn.onclick=function(){
       var rest=''; list.slice(SHOW).forEach(function(x){ rest+=card(x.h); });
