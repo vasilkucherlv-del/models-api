@@ -42,9 +42,13 @@
   var T=isRu
     ? {code:'Код: ', ok:'В наличии', off:'Нет в наличии', more:'Показать ещё', empty:'Аналоги для этого товара пока не добавлены.',
        tglTitle:function(n){return 'Есть '+n+' '+plural(n,'аналог','аналога','аналогов');}, tglFrom:'от ',
+       oosAvail:'✓ Этот товар закончился, но есть замена в наличии',
+       oosAny:'Аналоги этого товара',
        price:function(p){return p?fmt(p)+' грн':'цена по запросу';}}
     : {code:'Код: ', ok:'В наявності', off:'Немає в наявності', more:'Показати ще', empty:'Аналоги для цього товару поки не додані.',
        tglTitle:function(n){return 'Є '+n+' '+plural(n,'аналог','аналоги','аналогів');}, tglFrom:'від ',
+       oosAvail:'✓ Цей товар закінчився, але є заміна в наявності',
+       oosAny:'Аналоги цього товару',
        price:function(p){return p?fmt(p)+' грн':'ціна за запитом';}};
   function plural(n,one,few,many){
     var m10=n%10,m100=n%100;
@@ -176,6 +180,27 @@
   // мобільної теми — одразу після блоку «Сумісні моделі» (або після опису).
   // Блок вставляється лише при render(), тож без аналогів нічого не з'являється.
   function insertOwnBlock(mount,list,openNow){
+    // Товару НЕМАЄ в наявності: одразу РОЗГОРНУТА картка із зеленою шапкою
+    // під «Повідомити, коли з'явиться» — без згортання і зайвих дотиків
+    // («варіант 2», вибір власника).
+    if(openNow){
+      var nh=notifyHost();
+      if(nh){
+        var box=document.createElement('div');
+        box.className='product__block la-block la-near la-oos';
+        var avail=false;
+        for(var a=0;a<list.length;a++){ if(list[a].h&&list[a].h.available){ avail=true; break; } }
+        var bar=document.createElement('div');
+        bar.className='la-oos-hd'+(avail?'':' la-oos-mut');
+        bar.textContent=avail?T.oosAvail:T.oosAny;
+        var bd=document.createElement('div'); bd.className='la-oos-bd';
+        bd.appendChild(mount);
+        box.appendChild(bar); box.appendChild(bd);
+        nh.parentNode.insertBefore(box, nh.nextSibling);
+        return true;
+      }
+      return false; // блок покупки ще не домальований — render() спробує ще раз
+    }
     var sec=document.createElement('div'); sec.className='product__block la-block';
     // Заголовок-«кнопка», зрозумілий покупцю: іконка, назва з кількістю, пояснення,
     // міні-фото товарів усередині і стрілка. За замовчуванням ЗГОРНУТО.
@@ -204,18 +229,6 @@
       var a=hd.querySelector('.la-arr'); if(a) a.innerHTML=open?'&#9662;':'&#9652;';
     };
     sec.appendChild(hd); sec.appendChild(inner);
-    // Товару НЕМАЄ в наявності: ставимо блок одразу під «Повідомити, коли
-    // з'явиться» — там, де покупець вирішує піти, — і ОДРАЗУ РОЗГОРНУТИМ.
-    if(openNow){
-      var nh=notifyHost();
-      if(nh){
-        inner.style.display=''; hd.classList.add('la-open');
-        var ar=hd.querySelector('.la-arr'); if(ar) ar.innerHTML='&#9652;';
-        sec.className='product__block la-block la-near';
-        nh.parentNode.insertBefore(sec, nh.nextSibling);
-        return true;
-      }
-    }
     // Десктоп без вкладки «Аналоги»: блок одразу ПІД секцією вкладок. Розкладок
     // може бути кілька (дублі під різну ширину) — беремо видиму (offsetParent).
     var navs=document.querySelectorAll('.product-heading__nav'), nav=null;
@@ -318,6 +331,11 @@
       +'.la-wrap{font-family:Arial,Helvetica,sans-serif}'
       +'.la-block{margin:18px 0;font-family:Arial,Helvetica,sans-serif}'
       +'.la-near{margin:14px 0 4px;width:100%;max-width:100%;flex:1 1 100%;box-sizing:border-box}'
+      +'.la-oos{border:1.5px solid #bfe3cd;border-radius:10px;overflow:hidden;background:#fff}'
+      +'.la-oos-hd{background:#e9f7ef;color:#14663a;font-weight:700;font-size:13.5px;line-height:1.4;padding:9px 14px}'
+      +'.la-oos-hd.la-oos-mut{background:#f2f4f8;color:#5b6675}'
+      +'.la-oos-bd{padding:8px 10px 10px}'
+      +'.la-oos-bd .la-card{border:none;padding:6px 4px}'
       +'.la-tgl{display:flex;align-items:center;gap:10px;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;'
       +'border:1px solid #dfe3ea;border-radius:12px;padding:12px 14px;background:#fff;box-shadow:0 1px 3px rgba(15,30,60,.06)}'
       +'.la-tgl.la-open{border-radius:12px 12px 0 0}'
