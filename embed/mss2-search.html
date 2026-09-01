@@ -207,6 +207,33 @@
     var t = s.replace(/[\s\-]+/g, '');
     return (t && t !== s) ? t : null;
   }
+  // ЧИСЛОВИЙ КОД З КРАПКОЮ, введений ЧАСТКОВО: «187.00», а в базі «187.0003».
+  // Фраза «187.00» дає 0 (окремого слова «00» в назві немає), а той самий запит
+  // без лапок тягне все, де є «187» і будь-яке слово на «00» — лампочки, помпи.
+  // Тому шукаємо ЗЛИТУ форму «18700»: індексатор кладе такі коди без крапки в
+  // приховане поле codes, і Meili знаходить її за початком слова (18700 →
+  // 1870003) — точно, без сміття. Розміри сюди не потрапляють (мають свій шлях),
+  // дробові з одним знаком («13.5») теж — це не код.
+  function qNumCodeOf(raw){
+    var q = String(raw == null ? '' : raw).trim();
+    if (!q || DIM_RE.test(normDims(q))) return null;
+    var hit = false;
+    var t = q.split(/\s+/).map(function(w){
+      var m = w.match(/^(\d{2,6})[.,](\d{2,6})$/);
+      if (m) { hit = true; return m[1] + m[2]; }
+      return w;
+    }).join(' ');
+    return hit ? t : null;
+  }
+  // Той самий частковий код, але як ЗВИЧАЙНИЙ запит («187.00») — по назві,
+  // каталожному номеру й артикулу. Meili сам добирає слово за початком
+  // (00 → 0003), тож товар знаходиться і БЕЗ поля codes. Обмеження полів тут
+  // головне: усе сміття у видачі бралося з прихованих полів сумісних моделей
+  // і опису, де «187» і «00…» трапляються в різних місцях (лампочки, тени).
+  // Рівнем нижче за codes: там збіг точний, тут — трохи ширший.
+  function qNumPlainOf(raw){
+    return qNumCodeOf(raw) ? String(raw == null ? '' : raw).trim() : null;
+  }
   // ПОВНІША модель, ніж у базі: «VCM-K70GUAA», а в назвах лише «VCM-K70GU» —
   // зайвий суфікс (тут 2 літери) більший за толерантність до одруківок, тож усі
   // попередні рівні дають 0. Фолбек: відрізаємо хвостові ЛІТЕРИ коду по одній
@@ -237,7 +264,7 @@
   // лише коли попередній дав 0 — тож точні запити не «псуються».
   function orderedQ(){
     var out=[qNorm()];
-    [qRawPhraseOf(state.q), qPlainOf(state.q), qJoinedOf(state.q), qDimsLatinOf(state.q)].concat(qTrimList(state.q)).forEach(function(x){ if(x && out.indexOf(x)<0) out.push(x); });
+    [qRawPhraseOf(state.q), qPlainOf(state.q), qJoinedOf(state.q), qNumCodeOf(state.q), qNumPlainOf(state.q), qDimsLatinOf(state.q)].concat(qTrimList(state.q)).forEach(function(x){ if(x && out.indexOf(x)<0) out.push(x); });
     // Кандидат без жодної букви/цифри («!!!») для Meili — порожній запит,
     // а порожній запит повертає ВЕСЬ каталог. Відкидаємо: буде «Нічого не знайдено».
     return out.filter(function(x){ return x!=='' && /[0-9a-zа-яёіїєґ]/i.test(x); });
@@ -379,7 +406,14 @@
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); });
   }
   function searchSafe(body){
-    return search(body).catch(function(e){ if(body.sort){ var b=Object.assign({},body); delete b.sort; state.canSort=false; return search(b); } throw e; });
+    return search(body).catch(function(e){
+      // Поле codes зʼявляється лише після переіндексації. Поки його немає,
+      // Meili відхиляє attributesToSearchOn — тоді просто вважаємо, що цей
+      // кандидат нічого не дав, і перебір іде далі (як було до змін).
+      if(body.attributesToSearchOn) return {hits:[],estimatedTotalHits:0};
+      if(body.sort){ var b=Object.assign({},body); delete b.sort; state.canSort=false; return search(b); }
+      throw e;
+    });
   }
   function multiSearch(queries){
     return fetch(HOST+'/multi-search',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+KEY},body:JSON.stringify({queries:queries})})
@@ -387,6 +421,14 @@
   }
   function filters(cat){ var c=(cat!==undefined?cat:state.filterVal); return c?['category = '+JSON.stringify(c)]:undefined; }
   function sortArr(){ return state.canSort?['available:desc']:undefined; }
+  // Кандидати часткового коду шукаємо у ВУЗЬКОМУ наборі полів. Інакше збіги
+  // приходять із прихованих полів сумісних моделей і опису, де «187» і «00…»
+  // стоять у різних місцях, — саме звідти бралися лампочки й тени у видачі.
+  function codeOn(q){
+    if(q===qNumCodeOf(state.q)) return ['codes'];                  // точно (після переіндексації)
+    if(q===qNumPlainOf(state.q)) return ['name','partno','sku'];   // працює і на старому індексі
+    return undefined;
+  }
 
   function loadFacets(){
     if(!state.q){ side.innerHTML=''; if(gridEl) gridEl.classList.add('mss2-noside'); hideCatToggle(); state.total=0; return Promise.resolve(); }
@@ -398,9 +440,13 @@
     if(!cands.length){ state.catDist={}; state.total=0; renderSide(); noteEl.textContent=''; return Promise.resolve(); }
     // той самий перебір кандидатів, що й у renderFlat — щоб лічильник і категорії збігались.
     function attempt(i){
-      var q=cands[i];
-      return search({q:q,limit:0,facets:['category'],matchingStrategy:'all'}).then(function(d){ state.catAvailable=true; return d; })
-        .catch(function(){ state.catAvailable=false; return search({q:q,limit:0,matchingStrategy:'all'}); })
+      var q=cands[i], on=codeOn(q);
+      var base={q:q,limit:0,matchingStrategy:'all'};
+      if(on) base.attributesToSearchOn=on;
+      return search(Object.assign({facets:['category']},base)).then(function(d){ state.catAvailable=true; return d; })
+        // Помилка через attributesToSearchOn (поле codes зʼявиться після
+        // переіндексації) — це НЕ ознака того, що фасети недоступні.
+        .catch(function(){ if(!on) state.catAvailable=false; return searchSafe(base); })
         .then(function(d){
           if((d.estimatedTotalHits||0)===0 && i<cands.length-1) return attempt(i+1);
           return d;
@@ -435,7 +481,7 @@
   function renderFlat(reset){
     if(reset){ state.offset=0; state.hits=[]; state.kbd=-1; state.baseNote=null; state.effQ=qNorm(); }
     var srt=sortArr();
-    function mkBody(qs){ var b={q:qs,limit:state.limit,offset:state.offset,matchingStrategy:'all'}; if(srt) b.sort=srt; var f=filters(); if(f) b.filter=f; return b; }
+    function mkBody(qs){ var b={q:qs,limit:state.limit,offset:state.offset,matchingStrategy:'all'}; if(srt) b.sort=srt; var f=filters(); if(f) b.filter=f; var on=codeOn(qs); if(on) b.attributesToSearchOn=on; return b; }
     // Недодрукований розмір (25*47*8/1) → повний нічого не дав: пропонуємо базовий розмір.
     function dimFallback(d){
       var base=dimBase(state.q);
