@@ -225,14 +225,22 @@
     }).join(' ');
     return hit ? t : null;
   }
-  // Той самий частковий код, але як ЗВИЧАЙНИЙ запит («187.00») — по назві,
-  // каталожному номеру й артикулу. Meili сам добирає слово за початком
-  // (00 → 0003), тож товар знаходиться і БЕЗ поля codes. Обмеження полів тут
-  // головне: усе сміття у видачі бралося з прихованих полів сумісних моделей
-  // і опису, де «187» і «00…» трапляються в різних місцях (лампочки, тени).
-  // Рівнем нижче за codes: там збіг точний, тут — трохи ширший.
+  // ЗАПИТ, ЩО ПОЧИНАЄТЬСЯ З ЦИФРИ, без лапок — по назві, каталожному номеру
+  // й артикулу. Причина ширша за коди з крапкою: Meili ламається саме на
+  // ФРАЗІ, щойно токенізатор ділить слово. Виміряно на бойовому індексі:
+  //   "300W" → 0,          300W → 4 (потрібний тен перший)
+  //   "331603304500" → 0,  331603304500 → 2 (обидві ручки Атлант)
+  //   "187.00" → 0,        187.00 → 7 (усі Zelmer 187.00xx)
+  // Обмеження полів тут головне: без нього збіги приходять із прихованих
+  // сумісних моделей і опису, де числа стоять у різних місцях, — саме звідти
+  // бралися лампочки й тени у видачі.
+  // Правило власника «уламок моделі не показує нічого» НЕ порушується:
+  // «70wh» по цих полях і далі дає 0 (перевірено на бойовому індексі).
   function qNumPlainOf(raw){
-    return qNumCodeOf(raw) ? String(raw == null ? '' : raw).trim() : null;
+    var q = String(raw == null ? '' : raw).trim();
+    if (!q || !/^\d/.test(q)) return null;        // лише запити з цифри на початку
+    if (DIM_RE.test(normDims(q))) return null;    // розмір — у нього свій шлях
+    return q;
   }
   // ПОВНІША модель, ніж у базі: «VCM-K70GUAA», а в назвах лише «VCM-K70GU» —
   // зайвий суфікс (тут 2 літери) більший за толерантність до одруківок, тож усі
@@ -439,14 +447,28 @@
     if(fb){ var fbq=qNormOf(fb); if(fbq && cands.indexOf(fbq)<0) cands.push(fbq); }
     if(!cands.length){ state.catDist={}; state.total=0; renderSide(); noteEl.textContent=''; return Promise.resolve(); }
     // той самий перебір кандидатів, що й у renderFlat — щоб лічильник і категорії збігались.
-    function attempt(i){
-      var q=cands[i], on=codeOn(q);
-      var base={q:q,limit:0,matchingStrategy:'all'};
+    function ask(q){
+      var on=codeOn(q), base={q:q,limit:0,matchingStrategy:'all'};
       if(on) base.attributesToSearchOn=on;
       return search(Object.assign({facets:['category']},base)).then(function(d){ state.catAvailable=true; return d; })
         // Помилка через attributesToSearchOn (поле codes зʼявиться після
         // переіндексації) — це НЕ ознака того, що фасети недоступні.
-        .catch(function(){ if(!on) state.catAvailable=false; return searchSafe(base); })
+        .catch(function(){ if(!on) state.catAvailable=false; return searchSafe(base); });
+    }
+    // те саме розширення, що й у renderFlat.widen — інакше лічильник показував би
+    // кількість «вузької» фрази, а картки — ширшу видачу.
+    function widen(d, q){
+      var np=qNumPlainOf(state.q);
+      if(!np || np===q) return d;
+      var tot=d.estimatedTotalHits||0;
+      if(tot===0 || tot>state.limit) return d;
+      return ask(np).then(function(d2){ return (d2.estimatedTotalHits||0)>tot ? d2 : d; })
+                    .catch(function(){ return d; });
+    }
+    function attempt(i){
+      var q=cands[i];
+      return ask(q)
+        .then(function(d){ return (d.estimatedTotalHits||0)>0 ? widen(d,q) : d; })
         .then(function(d){
           if((d.estimatedTotalHits||0)===0 && i<cands.length-1) return attempt(i+1);
           return d;
@@ -491,12 +513,30 @@
       }
       return d;
     }
+    // Фраза для запиту з ЦИФРИ буває «майже порожня»: Meili знаходить кілька
+    // випадкових збігів, перебір на цьому спиняється — і потрібний товар не
+    // показується («2000W» давав 13 чужих позицій без жодного тена на 2000W).
+    // Тому якщо фраза вмістилась на одну сторінку, пробуємо той самий запит
+    // без лапок по name/partno/sku і беремо його, коли він дав БІЛЬШЕ.
+    // Розмірів не стосується — у qNumPlainOf стоїть захист.
+    // Заміряно на всьому каталозі: +24 знайдених товари, жодного зламаного.
+    function widen(d, q){
+      var np=qNumPlainOf(state.q);
+      if(!np || np===q) return d;
+      var tot=d.estimatedTotalHits||0;
+      if(tot===0 || tot>state.limit) return d;
+      return searchSafe(mkBody(np)).then(function(d2){
+        if((d2.estimatedTotalHits||0)>tot){ state.effQ=np; return d2; }
+        return d;
+      }).catch(function(){ return d; });
+    }
     // Перебір кандидатів запиту (canonical → зл.код → по словах), кожен наступний —
     // лише коли попередній дав 0. Виграшний запит фіксуємо в state.effQ (для пагінації).
     function firstHit(cands, i){
       var q=cands[i]; state.effQ=q;
       return searchSafe(mkBody(q)).then(function(d){
-        if((d.estimatedTotalHits||0)>0 || i>=cands.length-1) return d;
+        if((d.estimatedTotalHits||0)>0) return widen(d, q);
+        if(i>=cands.length-1) return d;
         return firstHit(cands, i+1);
       });
     }
