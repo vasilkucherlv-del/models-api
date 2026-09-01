@@ -242,6 +242,41 @@
     if (DIM_RE.test(normDims(q))) return null;    // розмір — у нього свій шлях
     return q;
   }
+  // ── ЗАБУЛИ ПЕРЕМКНУТИ РОЗКЛАДКУ ──
+  // Пишуть «фільтр», не перемкнувши клавіатуру, — виходить «askmnh». Розкладка
+  // українська ЙЦУКЕН, тож кожна латинська літера відповідає українській на тій
+  // самій клавіші: a→ф, s→і, k→л, m→ь, n→т, h→р. Перекладаємо назад і шукаємо
+  // нормальне слово. Спрацьовує ОСТАННІМ — лише коли все інше дало 0, тож
+  // справжні латинські коди (VCM-K70GU, DC62-00007A) це не зачіпає.
+  var KB_LAT = "qwertyuiop[]asdfghjkl;'zxcvbnm,./";
+  var KB_UKR = "йцукенгшщзхїфівапролджєячсмитьбю.";
+  var KB_MAP = {};
+  for (var _i = 0; _i < KB_LAT.length; _i++) {
+    KB_MAP[KB_LAT.charAt(_i)] = KB_UKR.charAt(_i);
+    KB_MAP[KB_LAT.charAt(_i).toUpperCase()] = KB_UKR.charAt(_i).toUpperCase();
+    KB_MAP[KB_UKR.charAt(_i)] = KB_LAT.charAt(_i);                       // і назад
+    KB_MAP[KB_UKR.charAt(_i).toUpperCase()] = KB_LAT.charAt(_i).toUpperCase();
+  }
+  // Російська розкладка стоїть на тих самих клавішах, крім трьох: ы(s), э('), ъ(]).
+  // Без них «ыфьыгты» (samsung з російської) перекладалось із дірками.
+  var KB_RU = { 'ы':'s', 'э':"'", 'ъ':']', 'ё':'`' };
+  for (var _r in KB_RU) {
+    KB_MAP[_r] = KB_RU[_r];
+    KB_MAP[_r.toUpperCase()] = KB_RU[_r].toUpperCase();
+  }
+  function qLayoutOf(raw){
+    var q = String(raw == null ? '' : raw).trim();
+    // ЛИШЕ суцільні слова з літер: у партномерах майже завжди є цифри, і
+    // перекладати їх не можна — інакше відсутній код показував би випадкове.
+    if (!q || !/^[A-Za-zА-Яа-яЁёІіЇїЄєҐґЫыЭэЪъ'\[\];,.\/ ]{3,}$/.test(q)) return null;
+    var out = '', changed = false;
+    for (var i = 0; i < q.length; i++) {
+      var c = q.charAt(i), m = KB_MAP[c];
+      if (m) { out += m; changed = true; } else { out += c; }
+    }
+    out = out.trim();
+    return (changed && out && out !== q) ? out : null;
+  }
   // ПОВНІША модель, ніж у базі: «VCM-K70GUAA», а в назвах лише «VCM-K70GU» —
   // зайвий суфікс (тут 2 літери) більший за толерантність до одруківок, тож усі
   // попередні рівні дають 0. Фолбек: відрізаємо хвостові ЛІТЕРИ коду по одній
@@ -273,6 +308,8 @@
   function orderedQ(){
     var out=[qNorm()];
     [qRawPhraseOf(state.q), qPlainOf(state.q), qJoinedOf(state.q), qNumCodeOf(state.q), qNumPlainOf(state.q), qDimsLatinOf(state.q)].concat(qTrimList(state.q)).forEach(function(x){ if(x && out.indexOf(x)<0) out.push(x); });
+    // Забули перемкнути розкладку — пробуємо ОСТАННІМ, коли все інше дало 0.
+    var kb=qLayoutOf(state.q); if(kb && out.indexOf(kb)<0) out.push(kb);
     // Кандидат без жодної букви/цифри («!!!») для Meili — порожній запит,
     // а порожній запит повертає ВЕСЬ каталог. Відкидаємо: буде «Нічого не знайдено».
     return out.filter(function(x){ return x!=='' && /[0-9a-zа-яёіїєґ]/i.test(x); });
@@ -501,7 +538,7 @@
   }
 
   function renderFlat(reset){
-    if(reset){ state.offset=0; state.hits=[]; state.kbd=-1; state.baseNote=null; state.effQ=qNorm(); }
+    if(reset){ state.offset=0; state.hits=[]; state.kbd=-1; state.baseNote=null; state.kbNote=null; state.effQ=qNorm(); }
     var srt=sortArr();
     function mkBody(qs){ var b={q:qs,limit:state.limit,offset:state.offset,matchingStrategy:'all'}; if(srt) b.sort=srt; var f=filters(); if(f) b.filter=f; var on=codeOn(qs); if(on) b.attributesToSearchOn=on; return b; }
     // Недодрукований розмір (25*47*8/1) → повний нічого не дав: пропонуємо базовий розмір.
@@ -535,7 +572,11 @@
     function firstHit(cands, i){
       var q=cands[i]; state.effQ=q;
       return searchSafe(mkBody(q)).then(function(d){
-        if((d.estimatedTotalHits||0)>0) return widen(d, q);
+        if((d.estimatedTotalHits||0)>0){
+          // виграв варіант «забули перемкнути розкладку» — скажемо про це прямо
+          if(q===qLayoutOf(state.q)) state.kbNote=q;
+          return widen(d, q);
+        }
         if(i>=cands.length-1) return d;
         return firstHit(cands, i+1);
       });
@@ -564,6 +605,7 @@
       var html='';
       if(!state.hits.length){ html='<div class="mss2-empty">Нічого не знайдено за «'+esc(state.q)+'».</div>'; }
       else{
+        if(state.kbNote) html+='<div class="mss2-rt">Схоже, клавіатура була не в тій розкладці. Шукаємо «<b>'+esc(state.kbNote)+'</b>»:</div>';
         if(state.baseNote) html+='<div class="mss2-rt">Точного «'+esc(state.q)+'» немає. Показано товари розміру «'+esc(state.baseNote)+'»:</div>';
         html+='<div class="mss2-cards">';
         var prevAvail=null;
