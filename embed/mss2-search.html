@@ -225,6 +225,15 @@
     }).join(' ');
     return hit ? t : null;
   }
+  // Той самий частковий код, але як ЗВИЧАЙНИЙ запит («187.00») — по назві,
+  // каталожному номеру й артикулу. Meili сам добирає слово за початком
+  // (00 → 0003), тож товар знаходиться і БЕЗ поля codes. Обмеження полів тут
+  // головне: усе сміття у видачі бралося з прихованих полів сумісних моделей
+  // і опису, де «187» і «00…» трапляються в різних місцях (лампочки, тени).
+  // Рівнем нижче за codes: там збіг точний, тут — трохи ширший.
+  function qNumPlainOf(raw){
+    return qNumCodeOf(raw) ? String(raw == null ? '' : raw).trim() : null;
+  }
   // ПОВНІША модель, ніж у базі: «VCM-K70GUAA», а в назвах лише «VCM-K70GU» —
   // зайвий суфікс (тут 2 літери) більший за толерантність до одруківок, тож усі
   // попередні рівні дають 0. Фолбек: відрізаємо хвостові ЛІТЕРИ коду по одній
@@ -255,7 +264,7 @@
   // лише коли попередній дав 0 — тож точні запити не «псуються».
   function orderedQ(){
     var out=[qNorm()];
-    [qRawPhraseOf(state.q), qPlainOf(state.q), qJoinedOf(state.q), qNumCodeOf(state.q), qDimsLatinOf(state.q)].concat(qTrimList(state.q)).forEach(function(x){ if(x && out.indexOf(x)<0) out.push(x); });
+    [qRawPhraseOf(state.q), qPlainOf(state.q), qJoinedOf(state.q), qNumCodeOf(state.q), qNumPlainOf(state.q), qDimsLatinOf(state.q)].concat(qTrimList(state.q)).forEach(function(x){ if(x && out.indexOf(x)<0) out.push(x); });
     // Кандидат без жодної букви/цифри («!!!») для Meili — порожній запит,
     // а порожній запит повертає ВЕСЬ каталог. Відкидаємо: буде «Нічого не знайдено».
     return out.filter(function(x){ return x!=='' && /[0-9a-zа-яёіїєґ]/i.test(x); });
@@ -412,9 +421,14 @@
   }
   function filters(cat){ var c=(cat!==undefined?cat:state.filterVal); return c?['category = '+JSON.stringify(c)]:undefined; }
   function sortArr(){ return state.canSort?['available:desc']:undefined; }
-  // Кандидат «злитого коду» (18700) шукаємо ЛИШЕ в полі codes: у назві
-  // одруківки прирівняли б його до «1800W»/«1700w» — і видача була б зі сміттям.
-  function codeOn(q){ return q===qNumCodeOf(state.q) ? ['codes'] : undefined; }
+  // Кандидати часткового коду шукаємо у ВУЗЬКОМУ наборі полів. Інакше збіги
+  // приходять із прихованих полів сумісних моделей і опису, де «187» і «00…»
+  // стоять у різних місцях, — саме звідти бралися лампочки й тени у видачі.
+  function codeOn(q){
+    if(q===qNumCodeOf(state.q)) return ['codes'];                  // точно (після переіндексації)
+    if(q===qNumPlainOf(state.q)) return ['name','partno','sku'];   // працює і на старому індексі
+    return undefined;
+  }
 
   function loadFacets(){
     if(!state.q){ side.innerHTML=''; if(gridEl) gridEl.classList.add('mss2-noside'); hideCatToggle(); state.total=0; return Promise.resolve(); }
