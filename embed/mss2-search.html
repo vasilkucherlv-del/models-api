@@ -242,6 +242,35 @@
     if (DIM_RE.test(normDims(q))) return null;    // розмір — у нього свій шлях
     return q;
   }
+  // ── НУЛІ СПЕРЕДУ КОДУ ──
+  // У базі «Bosch 00266751», покупець вводить «266751» — і нуль результатів:
+  // Meilisearch добирає слово лише за ПОЧАТКОМ, а «00266751» починається з
+  // нулів. Те саме з літерною приставкою: «C00266751» проти введеного
+  // «C266751». Тому пробуємо той самий код із 1–5 нулями перед числом.
+  // Заміряно на бойовому каталозі: 426 таких кодів, зараз знаходиться 8.
+  // Нулі ВСЕРЕДИНІ коду (DC62-00007A) не чіпаємо — лише спереду числа.
+  var ZERO_MAX = 6;   // у каталозі трапляється й AS00000033 — шість нулів
+  // У каталозі трапляється кирилична «С» у латинському коді (С00041088 замість
+  // C00041088) — на око однаково, для порівняння рядків ні. Зводимо схожі
+  // кириличні літери до латиниці, щоб перевірка «код є в назві» не хибила.
+  var LOOKALIKE = { 'А':'A','В':'B','С':'C','Е':'E','Н':'H','І':'I','К':'K','М':'M','О':'O','Р':'P','Т':'T','Х':'X','а':'a','в':'b','с':'c','е':'e','о':'o','р':'p','х':'x','і':'i' };
+  function latinize(s){
+    return String(s == null ? '' : s).toUpperCase().replace(/[А-Яа-яІіЇїЄєҐґ]/g, function(c){
+      return LOOKALIKE[c] || LOOKALIKE[c.toUpperCase()] || c;
+    });
+  }
+  function qZeroPadList(raw){
+    var q = String(raw == null ? '' : raw).trim();
+    // дві форми: суцільні цифри або коротка літерна приставка + цифри
+    var m = q.match(/^([A-Za-zА-Яа-яІіЇїЄєҐґ]{0,4})(\d{2,13})$/);
+    if (!m) return [];
+    var pref = m[1], num = m[2];
+    if (num.charAt(0) === '0') return [];            // нулі вже є — доповнювати нічого
+    if (!pref && num.length < 4) return [];          // надто короткий чистий номер
+    var out = [];
+    for (var z = 1; z <= ZERO_MAX; z++) out.push(pref + new Array(z + 1).join('0') + num);
+    return out;
+  }
   // ── ЗАБУЛИ ПЕРЕМКНУТИ РОЗКЛАДКУ ──
   // Пишуть «фільтр», не перемкнувши клавіатуру, — виходить «askmnh». Розкладка
   // українська ЙЦУКЕН, тож кожна латинська літера відповідає українській на тій
@@ -472,6 +501,9 @@
   function codeOn(q){
     if(q===qNumCodeOf(state.q)) return ['codes'];                  // точно (після переіндексації)
     if(q===qNumPlainOf(state.q)) return ['name','partno','sku'];   // працює і на старому індексі
+    // варіант із доданими нулями спереду — теж лише по цих полях, інакше
+    // збіги приходять із прихованих сумісних моделей і опису
+    if(qZeroPadList(state.q).indexOf(q)>=0) return ['name','partno','sku'];
     return undefined;
   }
 
@@ -511,7 +543,20 @@
           return d;
         });
     }
-    return attempt(0).then(function(d){
+    // той самий фолбек нулів, що й у renderFlat.zeroFallback — щоб «Знайдено: N»
+    // і категорії відповідали карткам, а не порожній фразі.
+    function zeroFacets(d){
+      if((d.estimatedTotalHits||0)>0) return d;
+      var list=qZeroPadList(state.q);
+      if(!list.length) return d;
+      return list.reduce(function(p,z){
+        return p.then(function(acc){
+          if((acc.estimatedTotalHits||0)>0) return acc;
+          return ask(z).then(function(r){ return (r.estimatedTotalHits||0)>0 ? r : acc; });
+        });
+      }, Promise.resolve(d)).catch(function(){ return d; });
+    }
+    return attempt(0).then(zeroFacets).then(function(d){
       state.catDist=(d.facetDistribution&&d.facetDistribution.category)||{};
       state.total=d.estimatedTotalHits||0; renderSide();
       noteEl.textContent=(state.catAvailable===false)?'категорії з\'являться після оновлення каталогу':'';
@@ -538,7 +583,7 @@
   }
 
   function renderFlat(reset){
-    if(reset){ state.offset=0; state.hits=[]; state.kbd=-1; state.baseNote=null; state.kbNote=null; state.effQ=qNorm(); }
+    if(reset){ state.offset=0; state.hits=[]; state.kbd=-1; state.baseNote=null; state.kbNote=null; state.zeroNote=null; state.effQ=qNorm(); }
     var srt=sortArr();
     function mkBody(qs){ var b={q:qs,limit:state.limit,offset:state.offset,matchingStrategy:'all'}; if(srt) b.sort=srt; var f=filters(); if(f) b.filter=f; var on=codeOn(qs); if(on) b.attributesToSearchOn=on; return b; }
     // Недодрукований розмір (25*47*8/1) → повний нічого не дав: пропонуємо базовий розмір.
@@ -567,6 +612,41 @@
         return d;
       }).catch(function(){ return d; });
     }
+    // Нулі спереду коду: усі варіанти шлемо ОДНИМ запитом (multi-search), а не
+    // пʼятьма поспіль. Беремо той, що дав результат, із найменшою кількістю
+    // нулів — він найближчий до введеного.
+    // Просто «перший непорожній варіант» брати НЕ можна: через одруківки варіант
+    // із меншою кількістю нулів чіпляє чужий товар (C02599 замість C00002599).
+    // Тому беремо перший, у чиїх результатах код СПРАВДІ стоїть у назві.
+    // Код має стояти в назві ЦІЛИМ числом, а не шматком довшого: інакше варіант
+    // «0266751» зарахувався б за рахунок «00266751», і підказка показала б
+    // покупцю не той код.
+    function zeroHasCode(res, z){
+      var hs=(res&&res.hits)||[], zz=latinize(z);
+      for(var i=0;i<hs.length;i++){
+        var n=latinize(hs[i].name||''), p=n.indexOf(zz);
+        while(p>=0){
+          var before=p>0?n.charAt(p-1):'', after=n.charAt(p+zz.length);
+          if(!/\d/.test(before) && !/\d/.test(after)) return true;
+          p=n.indexOf(zz,p+1);
+        }
+      }
+      return false;
+    }
+    function zeroFallback(d){
+      var list=qZeroPadList(state.q);
+      if(!list.length) return d;
+      return multiSearch(list.map(function(z){
+        var b=mkBody(z); b.indexUid=INDEX; b.limit=state.limit; b.offset=0; return b;
+      })).then(function(rs){
+        for(var i=0;i<rs.length;i++){
+          if(rs[i] && (rs[i].estimatedTotalHits||0)>0 && zeroHasCode(rs[i], list[i])){
+            state.effQ=list[i]; state.zeroNote=list[i]; return rs[i];
+          }
+        }
+        return d;
+      }).catch(function(){ return d; });
+    }
     // Перебір кандидатів запиту (canonical → зл.код → по словах), кожен наступний —
     // лише коли попередній дав 0. Виграшний запит фіксуємо в state.effQ (для пагінації).
     function firstHit(cands, i){
@@ -592,6 +672,9 @@
         return Promise.resolve();
       }
       run=firstHit(cands, 0).then(function(d){
+        if((d.estimatedTotalHits||0)===0) return zeroFallback(d);
+        return d;
+      }).then(function(d){
         if((d.estimatedTotalHits||0)===0) return dimFallback(d);
         return d;
       });
@@ -606,6 +689,7 @@
       if(!state.hits.length){ html='<div class="mss2-empty">Нічого не знайдено за «'+esc(state.q)+'».</div>'; }
       else{
         if(state.kbNote) html+='<div class="mss2-rt">Схоже, клавіатура була не в тій розкладці. Шукаємо «<b>'+esc(state.kbNote)+'</b>»:</div>';
+        if(state.zeroNote) html+='<div class="mss2-rt">Точного «'+esc(state.q)+'» немає. Показано товари з кодом «<b>'+esc(state.zeroNote)+'</b>»:</div>';
         if(state.baseNote) html+='<div class="mss2-rt">Точного «'+esc(state.q)+'» немає. Показано товари розміру «'+esc(state.baseNote)+'»:</div>';
         html+='<div class="mss2-cards">';
         var prevAvail=null;
