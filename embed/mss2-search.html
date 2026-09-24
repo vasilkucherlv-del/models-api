@@ -259,6 +259,23 @@
       return LOOKALIKE[c] || LOOKALIKE[c.toUpperCase()] || c;
     });
   }
+  // Чи стоїть код у назві СПРАВЖНІМ цілим числом. Дві причини, обидві виміряні:
+  // 1) через одруківки Meili на «00171261» віддає «00171269» і «00174261» —
+  //    зовсім інші товари, їх показувати не можна;
+  // 2) без перевірки меж варіант «0266751» зараховувався б за рахунок
+  //    «00266751», і підказка називала б покупцю не той код.
+  function zeroHasCode(res, z){
+    var hs=(res&&res.hits)||[], zz=latinize(z);
+    for(var i=0;i<hs.length;i++){
+      var n=latinize(hs[i].name||''), p=n.indexOf(zz);
+      while(p>=0){
+        var before=p>0?n.charAt(p-1):'', after=n.charAt(p+zz.length);
+        if(!/\d/.test(before) && !/\d/.test(after)) return true;
+        p=n.indexOf(zz,p+1);
+      }
+    }
+    return false;
+  }
   function qZeroPadList(raw){
     var q = String(raw == null ? '' : raw).trim();
     // дві форми: суцільні цифри або коротка літерна приставка + цифри
@@ -545,16 +562,26 @@
     }
     // той самий фолбек нулів, що й у renderFlat.zeroFallback — щоб «Знайдено: N»
     // і категорії відповідали карткам, а не порожній фразі.
+    // Нулі спереду коду. Рішення ухвалюється САМЕ ТУТ і один раз — картки потім
+    // просто беруть state.zeroWin, тож лічильник, категорії й товари завжди
+    // збігаються. Усі варіанти йдуть одним multi-search запитом; беремо перший,
+    // у чиїх результатах код справді стоїть у назві (див. zeroHasCode).
     function zeroFacets(d){
+      state.zeroWin=null;
       if((d.estimatedTotalHits||0)>0) return d;
       var list=qZeroPadList(state.q);
       if(!list.length) return d;
-      return list.reduce(function(p,z){
-        return p.then(function(acc){
-          if((acc.estimatedTotalHits||0)>0) return acc;
-          return ask(z).then(function(r){ return (r.estimatedTotalHits||0)>0 ? r : acc; });
-        });
-      }, Promise.resolve(d)).catch(function(){ return d; });
+      return multiSearch(list.map(function(z){
+        return { indexUid:INDEX, q:z, limit:20, matchingStrategy:'all',
+                 facets:['category'], attributesToSearchOn:['name','partno','sku'] };
+      })).then(function(rs){
+        for(var i=0;i<rs.length;i++){
+          if(rs[i] && (rs[i].estimatedTotalHits||0)>0 && zeroHasCode(rs[i], list[i])){
+            state.zeroWin=list[i]; return rs[i];
+          }
+        }
+        return d;
+      }).catch(function(){ return d; });
     }
     return attempt(0).then(zeroFacets).then(function(d){
       state.catDist=(d.facetDistribution&&d.facetDistribution.category)||{};
@@ -617,35 +644,13 @@
     // нулів — він найближчий до введеного.
     // Просто «перший непорожній варіант» брати НЕ можна: через одруківки варіант
     // із меншою кількістю нулів чіпляє чужий товар (C02599 замість C00002599).
-    // Тому беремо перший, у чиїх результатах код СПРАВДІ стоїть у назві.
-    // Код має стояти в назві ЦІЛИМ числом, а не шматком довшого: інакше варіант
-    // «0266751» зарахувався б за рахунок «00266751», і підказка показала б
-    // покупцю не той код.
-    function zeroHasCode(res, z){
-      var hs=(res&&res.hits)||[], zz=latinize(z);
-      for(var i=0;i<hs.length;i++){
-        var n=latinize(hs[i].name||''), p=n.indexOf(zz);
-        while(p>=0){
-          var before=p>0?n.charAt(p-1):'', after=n.charAt(p+zz.length);
-          if(!/\d/.test(before) && !/\d/.test(after)) return true;
-          p=n.indexOf(zz,p+1);
-        }
-      }
-      return false;
-    }
+    // Переможця вже обрали фасети (loadFacets іде першим) — просто беремо його.
+    // Окремо тут НЕ перевибираємо: інакше лічильник/категорії й картки можуть
+    // розійтись (запит «171261» давав «Знайдено: 0» при 2 у категоріях).
     function zeroFallback(d){
-      var list=qZeroPadList(state.q);
-      if(!list.length) return d;
-      return multiSearch(list.map(function(z){
-        var b=mkBody(z); b.indexUid=INDEX; b.limit=state.limit; b.offset=0; return b;
-      })).then(function(rs){
-        for(var i=0;i<rs.length;i++){
-          if(rs[i] && (rs[i].estimatedTotalHits||0)>0 && zeroHasCode(rs[i], list[i])){
-            state.effQ=list[i]; state.zeroNote=list[i]; return rs[i];
-          }
-        }
-        return d;
-      }).catch(function(){ return d; });
+      if(!state.zeroWin) return d;
+      state.effQ=state.zeroWin; state.zeroNote=state.zeroWin;
+      return searchSafe(mkBody(state.zeroWin)).catch(function(){ return d; });
     }
     // Перебір кандидатів запиту (canonical → зл.код → по словах), кожен наступний —
     // лише коли попередній дав 0. Виграшний запит фіксуємо в state.effQ (для пагінації).
