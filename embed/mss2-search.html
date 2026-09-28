@@ -276,6 +276,20 @@
     }
     return false;
   }
+  // Чи є сам запит у виданих товарах (за назвою чи артикулом), якщо прибрати
+  // розділювачі: «NB-250» ↔ «NB250». Потрібно, щоб відрізнити ВУЗЬКУ, але
+  // ПРАВИЛЬНУ видачу від вузької й випадкової: фраза «HQ 8» віддавала один
+  // ущільнювач Whirlpool, а фраза «NB 250» — саме ту щітку, що треба.
+  function hitsHaveQuery(res, raw){
+    var c=latinize(raw).replace(/[^0-9A-Z]/g,'');
+    if(!c) return true;
+    var hs=(res&&res.hits)||[];
+    for(var i=0;i<hs.length;i++){
+      var t=latinize((hs[i].name||'')+' '+(hs[i].sku||'')).replace(/[^0-9A-Z]/g,'');
+      if(t.indexOf(c)>=0) return true;
+    }
+    return false;
+  }
   function qZeroPadList(raw){
     var q = String(raw == null ? '' : raw).trim();
     // дві форми: суцільні цифри або коротка літерна приставка + цифри
@@ -524,8 +538,18 @@
     return undefined;
   }
 
-  function loadFacets(){
-    if(!state.q){ side.innerHTML=''; if(gridEl) gridEl.classList.add('mss2-noside'); hideCatToggle(); state.total=0; return Promise.resolve(); }
+  // Поки набирають, устигає піти запит по НЕПОВНОМУ слову («SH7» замість
+  // «SH70»). Його відповідь приходить пізніше й затирала свіжу — той самий
+  // запит давав то 1, то 2 товари. Кожен пошук має свій номер; відповідь
+  // старішого просто нічого не записує.
+  var gen=0;
+  function fresh(g){ return g===gen; }
+  function loadFacets(g){
+    if(!state.q){ side.innerHTML=''; if(gridEl) gridEl.classList.add('mss2-noside'); hideCatToggle(); state.total=0; return Promise.resolve(null); }
+    // Рішення живе В ЦЬОМУ виклику і повертається назовні — картки беруть саме
+    // його, а не спільну змінну. Тоді відповідь по неповному слову ніяк не може
+    // підмінити рішення для повного запиту.
+    var dec={q:state.q, wide:null, zero:null};
     var cands=orderedQ();
     // той самий фолбек «недодрукованого розміру», що й у результатах (renderFlat.dimFallback):
     // інакше картки показують товари базового розміру, а лічильник/категорії — нуль.
@@ -541,15 +565,40 @@
         // переіндексації) — це НЕ ознака того, що фасети недоступні.
         .catch(function(){ if(!on) state.catAvailable=false; return searchSafe(base); });
     }
-    // те саме розширення, що й у renderFlat.widen — інакше лічильник показував би
-    // кількість «вузької» фрази, а картки — ширшу видачу.
+    // Картки потім беруть саме це рішення, тож лічильник, категорії й товари
+    // завжди збігаються.
+    // Кілька карток потрібні лише тут, тому тягнемо їх окремо і лише тоді,
+    // коли справді треба вирішувати.
+    function askHits(q){
+      var on=codeOn(q), b={q:q,limit:state.limit,matchingStrategy:'all'};
+      if(on) b.attributesToSearchOn=on;
+      return searchSafe(b);
+    }
+    // Вузька фраза підводить ПО-РІЗНОМУ, залежно від запиту, тож і правила два.
+    function takeWider(w, tot, d){
+      return ask(w).then(function(d2){
+        if((d2.estimatedTotalHits||0)>tot){ dec.wide=w; return d2; }
+        return d;
+      });
+    }
     function widen(d, q){
-      var np=qNumPlainOf(state.q);
-      if(!np || np===q) return d;
       var tot=d.estimatedTotalHits||0;
       if(tot===0 || tot>state.limit) return d;
-      return ask(np).then(function(d2){ return (d2.estimatedTotalHits||0)>tot ? d2 : d; })
-                    .catch(function(){ return d; });
+      // ЗАПИТ ІЗ ЦИФРИ: фраза буває НЕПОВНОЮ — «2000W» давав 13 позицій, і всі
+      // по суті свої, але тенів на 2000W серед них не було (їх 24). Тут
+      // вирішує кількість. Заміряно: +24 знайдені товари, жодного зламаного.
+      var np=qNumPlainOf(state.q);
+      if(np && np!==q) return takeWider(np, tot, d).catch(function(){ return d; });
+      // ЗАПИТ ІЗ ЛІТЕРИ: фраза буває ВИПАДКОВОЮ — «HQ 8» віддавала один чужий
+      // ущільнювач Whirlpool. Тут кількість не показник (правильна відповідь
+      // теж буває одна), тому дивимось, чи є сам запит у видачі: «NB 250» дає
+      // саме ту щітку — не чіпаємо. Заміряно: +22 знайдені, жодного зламаного.
+      var pp=qPlainOf(state.q);
+      if(!pp || pp===q) return d;
+      return askHits(q).then(function(dh){
+        if(hitsHaveQuery(dh, state.q)) return d;
+        return takeWider(pp, tot, d);
+      }).catch(function(){ return d; });
     }
     function attempt(i){
       var q=cands[i];
@@ -563,11 +612,11 @@
     // той самий фолбек нулів, що й у renderFlat.zeroFallback — щоб «Знайдено: N»
     // і категорії відповідали карткам, а не порожній фразі.
     // Нулі спереду коду. Рішення ухвалюється САМЕ ТУТ і один раз — картки потім
-    // просто беруть state.zeroWin, тож лічильник, категорії й товари завжди
+    // просто беруть це рішення, тож лічильник, категорії й товари завжди
     // збігаються. Усі варіанти йдуть одним multi-search запитом; беремо перший,
     // у чиїх результатах код справді стоїть у назві (див. zeroHasCode).
     function zeroFacets(d){
-      state.zeroWin=null;
+      if(dec.wide) return d;
       if((d.estimatedTotalHits||0)>0) return d;
       var list=qZeroPadList(state.q);
       if(!list.length) return d;
@@ -577,17 +626,19 @@
       })).then(function(rs){
         for(var i=0;i<rs.length;i++){
           if(rs[i] && (rs[i].estimatedTotalHits||0)>0 && zeroHasCode(rs[i], list[i])){
-            state.zeroWin=list[i]; return rs[i];
+            dec.zero=list[i]; return rs[i];
           }
         }
         return d;
       }).catch(function(){ return d; });
     }
     return attempt(0).then(zeroFacets).then(function(d){
+      if(!fresh(g)) return dec;
       state.catDist=(d.facetDistribution&&d.facetDistribution.category)||{};
       state.total=d.estimatedTotalHits||0; renderSide();
       noteEl.textContent=(state.catAvailable===false)?'категорії з\'являться після оновлення каталогу':'';
-    }).catch(function(){});
+      return dec;
+    }).catch(function(){ return dec; });
   }
   // мобільний трей категорій
   function showCatToggle(n){ if(!catToggle) return; catToggle.classList.add('mss2-show'); var l=catToggle.querySelector('.mss2-catlabel-t'); if(l) l.textContent='Категорії ('+n+')'; }
@@ -604,13 +655,17 @@
   function markActive(){ side.querySelectorAll('.mss2-cat').forEach(function(el){ var v=el.getAttribute('data-v')||null; el.classList.toggle('mss2-active',v===state.filterVal); }); }
   function grouped(){ return false; } /* завжди плаский список, відсортований за наявністю */
 
-  function runSearch(reset){
+  function runSearch(reset, dec){
     if(!state.q){ renderRecentOrEmpty(); countEl.textContent='Почни вводити запит'; return Promise.resolve(); }
+    // рішення, прийняте у loadFacets, кешуємо разом із запитом: клік по
+    // категорії перемальовує картки без нового loadFacets
+    if(dec && dec.q===state.q) state.dec=dec;
     return grouped()?renderGrouped():renderFlat(reset);
   }
 
   function renderFlat(reset){
     if(reset){ state.offset=0; state.hits=[]; state.kbd=-1; state.baseNote=null; state.kbNote=null; state.zeroNote=null; state.effQ=qNorm(); }
+    var dec=(state.dec && state.dec.q===state.q) ? state.dec : {wide:null, zero:null};
     var srt=sortArr();
     function mkBody(qs){ var b={q:qs,limit:state.limit,offset:state.offset,matchingStrategy:'all'}; if(srt) b.sort=srt; var f=filters(); if(f) b.filter=f; var on=codeOn(qs); if(on) b.attributesToSearchOn=on; return b; }
     // Недодрукований розмір (25*47*8/1) → повний нічого не дав: пропонуємо базовий розмір.
@@ -622,22 +677,12 @@
       }
       return d;
     }
-    // Фраза для запиту з ЦИФРИ буває «майже порожня»: Meili знаходить кілька
-    // випадкових збігів, перебір на цьому спиняється — і потрібний товар не
-    // показується («2000W» давав 13 чужих позицій без жодного тена на 2000W).
-    // Тому якщо фраза вмістилась на одну сторінку, пробуємо той самий запит
-    // без лапок по name/partno/sku і беремо його, коли він дав БІЛЬШЕ.
-    // Розмірів не стосується — у qNumPlainOf стоїть захист.
-    // Заміряно на всьому каталозі: +24 знайдених товари, жодного зламаного.
+    // Вузьку фразу, що дала випадкову видачу, вже розширив loadFacets — беремо
+    // його рішення, щоб лічильник, категорії й картки не розходились.
     function widen(d, q){
-      var np=qNumPlainOf(state.q);
-      if(!np || np===q) return d;
-      var tot=d.estimatedTotalHits||0;
-      if(tot===0 || tot>state.limit) return d;
-      return searchSafe(mkBody(np)).then(function(d2){
-        if((d2.estimatedTotalHits||0)>tot){ state.effQ=np; return d2; }
-        return d;
-      }).catch(function(){ return d; });
+      if(!dec.wide || dec.wide===q) return d;
+      state.effQ=dec.wide;
+      return searchSafe(mkBody(dec.wide)).catch(function(){ return d; });
     }
     // Нулі спереду коду: усі варіанти шлемо ОДНИМ запитом (multi-search), а не
     // пʼятьма поспіль. Беремо той, що дав результат, із найменшою кількістю
@@ -648,9 +693,9 @@
     // Окремо тут НЕ перевибираємо: інакше лічильник/категорії й картки можуть
     // розійтись (запит «171261» давав «Знайдено: 0» при 2 у категоріях).
     function zeroFallback(d){
-      if(!state.zeroWin) return d;
-      state.effQ=state.zeroWin; state.zeroNote=state.zeroWin;
-      return searchSafe(mkBody(state.zeroWin)).catch(function(){ return d; });
+      if(!dec.zero) return d;
+      state.effQ=dec.zero; state.zeroNote=dec.zero;
+      return searchSafe(mkBody(dec.zero)).catch(function(){ return d; });
     }
     // Перебір кандидатів запиту (canonical → зл.код → по словах), кожен наступний —
     // лише коли попередній дав 0. Виграшний запит фіксуємо в state.effQ (для пагінації).
@@ -774,7 +819,8 @@
     timer=setTimeout(function(){
       state.offset=0;
       if(!state.q){ countEl.textContent='Почни вводити запит'; renderRecentOrEmpty(); return; }
-      if(gridEl) gridEl.style.display=''; loadFacets().then(function(){ runSearch(true); });
+      var g=++gen;
+      if(gridEl) gridEl.style.display=''; loadFacets(g).then(function(dec){ if(fresh(g)) runSearch(true, dec); });
     },150);
     // аналітика: лог «завершеного» запиту після паузи (не кожну літеру)
     clearTimeout(logTimer);
