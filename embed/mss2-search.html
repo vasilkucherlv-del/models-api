@@ -290,6 +290,19 @@
     }
     return false;
   }
+  // ОДИНИЦІ КИРИЛИЦЕЮ: пишуть «2000вт», «60н», «220в», а в назвах вони майже
+  // завжди латиницею (заміряно на каталозі: W 204, A 186, N 48, V 40, проти
+  // Вт 4, А 7, В 2). Через це «60н» і «300вт» давали НУЛЬ, а «2000вт» — 16
+  // замість 40. Переводимо одиницю в латиницю; кирилична форма лишається
+  // окремим кандидатом нижче — заради тих кількох товарів, де вона в назві.
+  // Літера має стояти ВПРИТУЛ до цифри: «3 в 1» (щітка 3 в 1) не чіпаємо.
+  var UNIT_LAT = { 'вт':'W', 'в':'V', 'н':'N', 'а':'A' };
+  function unitLat(raw){
+    var q = String(raw == null ? '' : raw);
+    return q.replace(/(\d)(вт|в|н|а)(?![\wа-яіїєґ'])/gi, function(_, d, u){
+      return d + UNIT_LAT[u.toLowerCase()];
+    });
+  }
   function qZeroPadList(raw){
     var q = String(raw == null ? '' : raw).trim();
     // дві форми: суцільні цифри або коротка літерна приставка + цифри
@@ -368,6 +381,10 @@
   function orderedQ(){
     var out=[qNorm()];
     [qRawPhraseOf(state.q), qPlainOf(state.q), qJoinedOf(state.q), qNumCodeOf(state.q), qNumPlainOf(state.q), qDimsLatinOf(state.q)].concat(qTrimList(state.q)).forEach(function(x){ if(x && out.indexOf(x)<0) out.push(x); });
+    // Одиниця таки кирилицею в назві (Вт/А/В — кілька товарів у каталозі):
+    // пробуємо як надруковано, коли латинська форма нічого не дала.
+    if(state.raw && state.raw!==state.q)
+      [qNormOf(state.raw), qPlainOf(state.raw)].forEach(function(x){ if(x && out.indexOf(x)<0) out.push(x); });
     // Забули перемкнути розкладку — пробуємо ОСТАННІМ, коли все інше дало 0.
     var kb=qLayoutOf(state.q); if(kb && out.indexOf(kb)<0) out.push(kb);
     // Кандидат без жодної букви/цифри («!!!») для Meili — порожній запит,
@@ -839,7 +856,10 @@
   }
 
   function onInput(){
-    state.q=q.value.trim(); state.filterVal=null;
+    // Одиниці кирилицею переводимо ОДРАЗУ при введенні — далі весь пошук
+    // (кандидати, розширення, коди) працює з однією, латинською формою.
+    // Як надруковано, лишається в state.raw — для запасного кандидата.
+    state.raw=q.value.trim(); state.q=unitLat(state.raw); state.filterVal=null;
     clearTimeout(timer);
     timer=setTimeout(function(){
       state.offset=0;
