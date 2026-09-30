@@ -566,7 +566,7 @@
     // Рішення живе В ЦЬОМУ виклику і повертається назовні — картки беруть саме
     // його, а не спільну змінну. Тоді відповідь по неповному слову ніяк не може
     // підмінити рішення для повного запиту.
-    var dec={q:state.q, wide:null, zero:null, last:false};
+    var dec={q:state.q, wide:null, zero:null, last:false, res:null};
     var cands=orderedQ();
     // той самий фолбек «недодрукованого розміру», що й у результатах (renderFlat.dimFallback):
     // інакше картки показують товари базового розміру, а лічильник/категорії — нуль.
@@ -575,22 +575,21 @@
     if(!cands.length){ state.catDist={}; state.total=0; renderSide(); noteEl.textContent=''; return Promise.resolve(); }
     // той самий перебір кандидатів, що й у renderFlat — щоб лічильник і категорії збігались.
     function ask(q){
-      var on=codeOn(q), base={q:q,limit:0,matchingStrategy:'all'};
+      // Беремо ОДРАЗУ і картки (limit, sort), а не лише лічильник: раніше
+      // панель рахувала кандидатів із limit:0, а потім картки проходили той
+      // самий перебір удруге — на «hq8» виходило 5 запитів поспіль по ~120 мс.
+      // Кандидати, що дали 0, порожні й нічого не важать.
+      var on=codeOn(q), srt=sortArr();
+      var base={q:q,limit:state.limit,matchingStrategy:'all'};
+      if(srt) base.sort=srt;
       if(on) base.attributesToSearchOn=on;
       return search(Object.assign({facets:['category']},base)).then(function(d){ state.catAvailable=true; return d; })
         // Помилка через attributesToSearchOn (поле codes зʼявиться після
         // переіндексації) — це НЕ ознака того, що фасети недоступні.
         .catch(function(){ if(!on) state.catAvailable=false; return searchSafe(base); });
     }
-    // Картки потім беруть саме це рішення, тож лічильник, категорії й товари
-    // завжди збігаються.
-    // Кілька карток потрібні лише тут, тому тягнемо їх окремо і лише тоді,
-    // коли справді треба вирішувати.
-    function askHits(q){
-      var on=codeOn(q), b={q:q,limit:state.limit,matchingStrategy:'all'};
-      if(on) b.attributesToSearchOn=on;
-      return searchSafe(b);
-    }
+    // картки вже є у відповіді ask()
+    function askHits(q){ return Promise.resolve(arguments[1]); }
     // Вузька фраза підводить ПО-РІЗНОМУ, залежно від запиту, тож і правила два.
     function takeWider(w, tot, d){
       return ask(w).then(function(d2){
@@ -612,7 +611,7 @@
       // саме ту щітку — не чіпаємо. Заміряно: +22 знайдені, жодного зламаного.
       var pp=qPlainOf(state.q);
       if(!pp || pp===q) return d;
-      return askHits(q).then(function(dh){
+      return askHits(q, d).then(function(dh){
         if(hitsHaveQuery(dh, state.q)) return d;
         return takeWider(pp, tot, d);
       }).catch(function(){ return d; });
@@ -620,7 +619,7 @@
     function attempt(i){
       var q=cands[i];
       return ask(q)
-        .then(function(d){ return (d.estimatedTotalHits||0)>0 ? widen(d,q) : d; })
+        .then(function(d){ if((d.estimatedTotalHits||0)>0 && q===qLayoutOf(state.q)) d.__kb=q; return (d.estimatedTotalHits||0)>0 ? widen(d,q) : d; })
         .then(function(d){
           if((d.estimatedTotalHits||0)===0 && i<cands.length-1) return attempt(i+1);
           return d;
@@ -638,8 +637,10 @@
       var list=qZeroPadList(state.q);
       if(!list.length) return d;
       return multiSearch(list.map(function(z){
-        return { indexUid:INDEX, q:z, limit:20, matchingStrategy:'all',
+        var zb={ indexUid:INDEX, q:z, limit:state.limit, matchingStrategy:'all',
                  facets:['category'], attributesToSearchOn:['name','partno','sku'] };
+        var zs=sortArr(); if(zs) zb.sort=zs;
+        return zb;
       })).then(function(rs){
         for(var i=0;i<rs.length;i++){
           if(rs[i] && (rs[i].estimatedTotalHits||0)>0 && zeroHasCode(rs[i], list[i])){
@@ -660,7 +661,9 @@
       if((d.estimatedTotalHits||0)>0) return d;
       if(dec.wide||dec.zero) return d;
       if(state.q.trim().split(/\s+/).length<2) return d;
-      return search({q:state.q,limit:0,facets:['category'],matchingStrategy:'last'})
+      var lb={q:state.q,limit:state.limit,facets:['category'],matchingStrategy:'last'};
+      var ls=sortArr(); if(ls) lb.sort=ls;
+      return search(lb)
         .then(function(d2){ if((d2.estimatedTotalHits||0)>0){ dec.last=true; return d2; } return d; })
         .catch(function(){ return d; });
     }
@@ -669,6 +672,7 @@
       state.catDist=(d.facetDistribution&&d.facetDistribution.category)||{};
       state.total=d.estimatedTotalHits||0; renderSide();
       noteEl.textContent=(state.catAvailable===false)?'категорії з\'являться після оновлення каталогу':'';
+      dec.res=d;
       return dec;
     }).catch(function(){ return dec; });
   }
@@ -759,6 +763,15 @@
         bindSuggest();
         return Promise.resolve();
       }
+      // Панель уже все з'ясувала і принесла картки — не повторюємо перебір.
+      // Фільтр по категорії її запит не враховував, тож там питаємо заново.
+      if(dec.res && !state.filterVal){
+        state.effQ=dec.wide||dec.zero||(dec.last?state.q:qNorm());
+        if(dec.zero) state.zeroNote=dec.zero;
+        if(dec.last) state.lastNote=true;
+        if(dec.res.__kb) state.kbNote=dec.res.__kb;
+        run=Promise.resolve(dec.res);
+      } else
       run=firstHit(cands, 0).then(function(d){
         if((d.estimatedTotalHits||0)===0) return zeroFallback(d);
         return d;
