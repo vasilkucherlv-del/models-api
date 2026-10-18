@@ -1,0 +1,151 @@
+<!-- ============================================================================
+     МОБІЛЬНА НАВІГАЦІЯ lartek.com.ua (лише мобільний шаблон Horoshop).
+       search — велике поле пошуку на головній (відкриває наявний пошук mss2)
+       buy    — на товарі: «← розділ» над заголовком + липка панель «ціна + Купити»
+       bar    — нижня панель: Каталог / Пошук / Кошик / Чат
+     Підключення: Horoshop → «Скрипти перед </body>»:
+       <script src="https://<API>/mobile-nav.js" defer></script>
+     Відкат: прибрати цей рядок, АБО змінна Railway MOBILE_NAV=off,
+             АБО MOBILE_NAV=search,buy (лише перелічені частини).
+     Своєї логіки кошика/пошуку тут немає — лише кліки по рідних кнопках сайту.
+     ============================================================================ -->
+<style>
+  .mnav-search{display:flex;align-items:center;gap:10px;margin:12px 16px 4px;padding:0 14px;height:50px;border:2px solid #b3200e;
+    border-radius:12px;background:#fff;color:#7a828c;font-size:16px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .mnav-search svg{flex:none;width:22px;height:22px;fill:none;stroke:#b3200e;stroke-width:2.2;stroke-linecap:round}
+  .mnav-search span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .mnav-back{display:inline-flex;align-items:center;gap:6px;margin:2px 0 8px;font-size:15px;color:#16315e;text-decoration:none}
+  .mnav-back svg{flex:none;width:16px;height:16px;stroke:currentColor}
+  .mnav-bar{position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;background:#fff;border-top:1px solid #e3e6ea;
+    box-shadow:0 -2px 10px rgba(0,0,0,.06);padding-bottom:env(safe-area-inset-bottom)}
+  .mnav-bar a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;height:56px;
+    color:#16315e;font-size:11px;text-decoration:none;position:relative;-webkit-tap-highlight-color:transparent}
+  .mnav-bar svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .mnav-cnt{position:absolute;top:5px;left:50%;margin-left:6px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;
+    background:#b3200e;color:#fff;font-size:11px;line-height:18px;text-align:center;box-sizing:border-box}
+  .mnav-cnt:empty{display:none}
+  .mnav-buy{position:fixed;left:0;right:0;z-index:59;display:flex;align-items:center;gap:12px;padding:8px 16px;background:#fff;
+    border-top:1px solid #e3e6ea;box-shadow:0 -2px 10px rgba(0,0,0,.08);transform:translateY(130%);visibility:hidden;transition:transform .2s,visibility .2s}
+  .mnav-buy.mnav-show{transform:none;visibility:visible}
+  .mnav-buy b{flex:1;font-size:19px;color:#1c2530;white-space:nowrap}
+  .mnav-buy button{flex:none;height:44px;padding:0 28px;border:0;border-radius:8px;background:#b3200e;color:#fff;font-size:17px}
+  .mnav-chat{position:fixed;left:12px;right:12px;z-index:61;display:none;flex-direction:column;gap:8px;padding:12px;background:#fff;
+    border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+  .mnav-chat.mnav-show{display:flex}
+  .mnav-chat a{display:block;padding:12px;border-radius:8px;background:#f2f4f7;color:#16315e;font-size:16px;text-decoration:none;text-align:center}
+</style>
+<script>
+(function(){
+  if (window.__mnav) return; window.__mnav = 1;
+  var PARTS = 'search,buy,bar';            // сервер підставляє значення з MOBILE_NAV
+  function on(p){ return (',' + PARTS + ',').indexOf(',' + p + ',') >= 0; }
+  var RU = /^\/ru(\/|$)/.test(location.pathname);
+  var T = RU
+    ? { q:'Модель техники или код запчасти', cat:'Каталог', s:'Поиск', cart:'Корзина', chat:'Чат', buy:'Купить' }
+    : { q:'Модель техніки або код запчастини', cat:'Каталог', s:'Пошук', cart:'Кошик', chat:'Чат', buy:'Купити' };
+  var ICON = {
+    search:'<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>',
+    cat:'<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
+    cart:'<svg viewBox="0 0 24 24"><path d="M3 4h2l2.4 11h11L21 7H6.2"/><circle cx="9" cy="19.5" r="1.5"/><circle cx="17" cy="19.5" r="1.5"/></svg>',
+    chat:'<svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>',
+    back:'<svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg>'
+  };
+  function $(s, r){ return (r || document).querySelector(s); }
+  function el(tag, cls, html){ var e = document.createElement(tag); if (cls) e.className = cls; if (html) e.innerHTML = html; return e; }
+  function tap(sel){ var b = $(sel); if (b) { b.click(); return true; } return false; }
+
+  // Пошук — той самий, що відкриває лупа в шапці (mss2 ловить клік по .search__toggle).
+  function openSearch(){ tap('.search__toggle') || tap('a[href="#search-results"]'); }
+  // Каталог: на головній є своя кнопка; на решті сторінок — меню й одразу його розділ «Каталог».
+  function openCatalog(){
+    if (tap('[data-panel="catalog-navigation"]')) return;
+    if (!tap('a[href="#menu"]')) { location.href = RU ? '/ru/katalog/' : '/katalog/'; return; }
+    setTimeout(function(){ tap('#menu a.mm-next[aria-label="Каталог"], a.mm-next[aria-label="Каталог"]'); }, 350);
+  }
+
+  function initSearch(){
+    var p = location.pathname;
+    if (!(p === '/' || p === '/ru/' || p === '/ru')) return;
+    var box = el('div', 'mnav-search', ICON.search + '<span>' + T.q + '</span>');
+    box.setAttribute('role', 'button');
+    box.addEventListener('click', openSearch);
+    var anchor = $('.btn--catalog-nav');
+    anchor = anchor && (anchor.closest('.container, section, div') || anchor);
+    if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(box, anchor);
+    else { var h = $('#header'); if (h && h.parentNode) h.parentNode.insertBefore(box, h.nextSibling); }
+  }
+
+  function initProduct(){
+    var buy = $('.j-buy-button-add[data-skin="mobile"]');
+    if (!buy) return;                                        // не сторінка товару
+    // «← розділ» — останній батьківський пункт хлібних крихт
+    var links = document.querySelectorAll('.breadcrumbs__link[href]');
+    var last = links[links.length - 1], h1 = $('h1');
+    if (last && h1 && h1.parentNode && !/\/katalog\/?$/.test(last.getAttribute('href'))) {
+      var a = el('a', 'mnav-back', ICON.back + '<span></span>');
+      a.href = last.getAttribute('href');
+      a.lastChild.textContent = last.textContent.trim();
+      h1.parentNode.insertBefore(a, h1);
+    }
+    // Липка «ціна + Купити» — коли рідна кнопка вже над екраном. Клік іде в рідну кнопку.
+    // Не IntersectionObserver: при різкому прокручуванні кнопка «перестрибує» екран і він мовчить.
+    var m =$('meta[itemprop="price"]'), price = m ? Number(m.getAttribute('content')) : 0;
+    var bar = el('div', 'mnav-buy', '<b></b><button type="button">' + T.buy + '</button>');
+    bar.firstChild.textContent = price ? price.toLocaleString('uk-UA') + ' грн' : '';
+    bar.lastChild.addEventListener('click', function(){ buy.click(); });
+    bar.style.bottom = on('bar') ? 'calc(57px + env(safe-area-inset-bottom))' : '0';
+    document.body.appendChild(bar);
+    var queued = false;
+    function sync(){
+      queued = false;
+      var shown = buy.getBoundingClientRect().bottom < 0 && !buy.disabled;
+      if (bar.classList.contains('mnav-show') !== shown) bar.classList.toggle('mnav-show', shown);
+    }
+    window.addEventListener('scroll', function(){ if (!queued) { queued = true; requestAnimationFrame(sync); } }, { passive:true });
+    sync();
+  }
+
+  function initBar(){
+    var bar = el('nav', 'mnav-bar');
+    function item(icon, label, fn){
+      var a = el('a', '', ICON[icon] + '<span>' + label + '</span>'); a.href = '#';
+      a.addEventListener('click', function(e){ e.preventDefault(); fn(); });
+      bar.appendChild(a); return a;
+    }
+    item('cat', T.cat, openCatalog);
+    item('search', T.s, openSearch);
+    var cartA = item('cart', T.cart, function(){ tap('a[href="#cart-drawer"]'); });
+    var cnt = el('span', 'mnav-cnt'); cartA.appendChild(cnt);
+    // Чат: посилання беремо з самого сайту (Viber/Telegram), щоб не дублювати номери.
+    var chat = el('div', 'mnav-chat');
+    var vb = $('a[href^="viber:"]'), tg = $('a[href*="t.me/"]');
+    if (vb) { var v = el('a'); v.href = vb.getAttribute('href'); v.textContent = 'Viber'; chat.appendChild(v); }
+    if (tg) { var t = el('a'); t.href = tg.getAttribute('href'); t.target = '_blank'; t.textContent = 'Telegram'; chat.appendChild(t); }
+    if (chat.children.length) {
+      chat.style.bottom = 'calc(66px + env(safe-area-inset-bottom))';
+      item('chat', T.chat, function(){ chat.classList.toggle('mnav-show'); });
+      document.addEventListener('click', function(e){ if (!e.target.closest('.mnav-chat, .mnav-bar')) chat.classList.remove('mnav-show'); });
+      document.body.appendChild(chat);
+    }
+    document.body.appendChild(bar);
+    document.body.style.paddingBottom = 'calc(57px + env(safe-area-inset-bottom))';
+    // Лічильник кошика — з шапки сайту; пишемо лише коли змінився (без миготіння).
+    function syncCnt(){
+      var s = $('.j-mini-cart-total'), n = s ? s.textContent.replace(/\D+/g, '') : '';
+      if (n === '0') n = '';
+      if (cnt.textContent !== n) cnt.textContent = n;
+    }
+    syncCnt();
+    var src = $('.j-mini-cart-total');
+    if (src && 'MutationObserver' in window) new MutationObserver(syncCnt).observe(src, { childList:true, characterData:true, subtree:true });
+  }
+
+  function boot(){
+    if (!$('a[href="#menu"]')) return;                       // десктопний шаблон — нічого не робимо
+    try { if (on('search')) initSearch(); } catch (e) {}
+    try { if (on('buy')) initProduct(); } catch (e) {}
+    try { if (on('bar')) initBar(); } catch (e) {}
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+})();
+</script>

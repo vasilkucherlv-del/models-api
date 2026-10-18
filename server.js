@@ -8,6 +8,7 @@ const XLSX = require('xlsx');
 const { pool, norm, init } = require('./db');
 const { parseFeed } = require('./import-feed');
 const { parseTables } = require('./table-parser');
+const { buildMobileNav } = require('./mobile-nav-build');
 const { collectDonorModels, resolveProduct } = require('./donor');
 const { matchDonorProduct } = require('./donor-search');
 const { codesFromName, isCandidate } = require('./donor-code');
@@ -328,6 +329,22 @@ app.get('/analogs.js', (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).send('// analogs error');
+  }
+});
+
+// === Мобільна навігація (пошук на головній, «Купити» на товарі, нижня панель) ===
+// У Horoshop: <script src=".../mobile-nav.js" defer></script>. Відкат — MOBILE_NAV=off (див. mobile-nav-build.js).
+let _mnavHtml = null;
+app.get('/mobile-nav.js', (req, res) => {
+  try {
+    if (!_mnavHtml) _mnavHtml = fs.readFileSync(path.join(__dirname, 'embed', 'mobile-nav.html'), 'utf8');
+    res.set('Content-Type', 'application/javascript; charset=utf-8');
+    res.set('Cache-Control', 'public, max-age=300');
+    res.set('Access-Control-Allow-Origin', '*');
+    res.send(buildMobileNav(_mnavHtml, process.env.MOBILE_NAV));
+  } catch (e) {
+    console.error(e);
+    res.status(500).send('// mobile-nav error');
   }
 });
 
