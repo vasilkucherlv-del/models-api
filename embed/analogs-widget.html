@@ -211,7 +211,7 @@
     var thumbs='',shown=0;
     for(var i=0;i<list.length&&shown<3;i++){
       var p=list[i].h&&list[i].h.picture; if(!p) continue;
-      thumbs+='<img class="la-stk" loading="lazy" src="'+thumb(p,88)+'" alt="">'; shown++;
+      thumbs+='<img class="la-stk" loading="lazy" src="'+thumb(p,88)+'" data-orig="'+esc(p)+'" alt="">'; shown++;
     }
     var extra=list.length-shown;
     if(extra>0) thumbs+='<span class="la-stk la-stk-more">+'+extra+'</span>';
@@ -373,7 +373,10 @@
     document.head.appendChild(st);
   }
   function card(h){
-    var img=h.picture?('<img class="la-img" loading="lazy" src="'+thumb(h.picture,168)+'" alt="" onerror="this.outerHTML=\'<div class=la-ph>—</div>\'">'):'<div class="la-ph">—</div>';
+    // Сайт за Cloudflare і сторонньому серверу картинок не віддає, тож
+    // мініатюра з wsrv.nl часто не приходить. Тоді беремо оригінал прямо з
+    // сайту — браузер покупця Cloudflare вже пройшов. Прочерк — третім кроком.
+    var img=h.picture?('<img class="la-img" loading="lazy" src="'+thumb(h.picture,168)+'" alt="" data-orig="'+esc(h.picture)+'">'):'<div class="la-ph">—</div>';
     var av=h.available?('<span class="la-av ok">'+T.ok+'</span>'):('<span class="la-av off">'+T.off+'</span>');
     // «Купити» — лише коли товар у наявності і відомий внутрішній id Horoshop
     // (без нього кошику нічого передати — тоді лишається перехід на сторінку).
@@ -434,6 +437,18 @@
     }
     if(!connected(mount)) insertOwnBlock(mount,list);
   }
+  // Помилка завантаження картинки не спливає — ловимо на фазі перехоплення.
+  function imgFallback(root){
+    if(!root || root.__laImgFb) return; root.__laImgFb=1;
+    root.addEventListener('error', function(e){
+      var im=e.target;
+      if(!im || im.tagName!=='IMG' || !/la-img|la-stk/.test(im.className||'')) return;
+      var o=im.getAttribute('data-orig');
+      if(o && !im.getAttribute('data-tried')){ im.setAttribute('data-tried','1'); im.src=o; return; }
+      if(/la-stk/.test(im.className)) { im.style.display='none'; return; }
+      im.outerHTML='<div class="la-ph">—</div>';
+    }, true);
+  }
   function paint(mount,list){
     if(!connected(mount)) return;
     // Вкладку, яку ховали заздалегідь (анти-блимання), повертаємо на місце.
@@ -441,7 +456,7 @@
     // display:none, і чіпати їх не можна.
     var pnl=mount.closest?mount.closest('[data-content-id]'):null;
     if(pnl){ unhideEl(pnl); unhideEl(tabFor(pnl)); }
-    css();
+    css(); imgFallback(mount);
     var html='<div class="la-wrap">';
     list.slice(0,SHOW).forEach(function(x){ html+=card(x.h); });
     if(list.length>SHOW) html+='<button type="button" class="la-more">'+T.more+' ('+(list.length-SHOW)+')</button>';
