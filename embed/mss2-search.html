@@ -110,7 +110,10 @@
   var timer=null, logTimer=null, built=false, q, side, results, countEl, noteEl, modal, gridEl, catToggle;
 
   function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
-  // Легкі мініатюри через безкоштовний ресайзер (200KB -> ~2KB). Якщо недоступний — onerror ховає.
+  // Легкі мініатюри через безкоштовний ресайзер (200KB -> ~2KB). Але сайт за
+  // Cloudflare і сторонньому серверу картинок не віддає, тож ресайзер бере
+  // лише те, що вже має в кеші. Коли не дав — вантажимо оригінал прямо з
+  // сайту (див. imgFallback): браузер покупця Cloudflare вже пройшов.
   function thumb(url,px){ if(!url) return ''; return 'https://wsrv.nl/?url='+encodeURIComponent(url)+'&w='+px+'&h='+px+'&fit=inside&output=webp'; }
   function fmt(n){return Math.round(n).toLocaleString('uk-UA');}
   // Канонічний розмір (як в індексаторі): числа сортуються, десятковий -> 'p', роздільник -> 'x'.
@@ -470,7 +473,7 @@
   function catIco(name){
     var u=CATIMG[name]; if(!u) return '<span class="mss2-ico">🔧</span>';
     var full=(u.slice(0,4)==='http')?u:CIMG_BASE+u;
-    return '<img class="mss2-catimg2" loading="lazy" src="'+thumb(full,80)+'" onerror="this.style.display=\'none\'">';
+    return '<img class="mss2-catimg2" loading="lazy" src="'+thumb(full,80)+'" data-orig="'+esc(full)+'">';
   }
   function toast(m){ var t=document.getElementById('mss2-toast'); t.textContent=m; t.classList.add('mss2-show'); setTimeout(function(){t.classList.remove('mss2-show');},1400); }
 
@@ -494,6 +497,7 @@
 
     q=modal.querySelector('#mss2-q'); side=modal.querySelector('#mss2-side'); results=modal.querySelector('#mss2-results');
     gridEl=modal.querySelector('.mss2-grid');
+    imgFallback(results); imgFallback(side);
     countEl=modal.querySelector('#mss2-count'); noteEl=modal.querySelector('#mss2-note');
     catToggle=modal.querySelector('#mss2-cattoggle');
     catToggle.onclick=function(){ var open=gridEl.classList.toggle('mss2-catopen'); catToggle.querySelector('.mss2-arw').textContent=open?'▴':'▾'; };
@@ -825,7 +829,7 @@
       cats.forEach(function(c,i){
         var hits=(res[i]&&res[i].hits)||[]; if(!hits.length) return;
         var cimg=hits[0]&&hits[0].picture;
-        var head='<span class="mss2-bhname">'+(cimg?'<img class="mss2-catimg" src="'+thumb(cimg,72)+'" onerror="this.style.display=\'none\'">':'')+'<b>'+esc(c[0])+'</b></span>';
+        var head='<span class="mss2-bhname">'+(cimg?'<img class="mss2-catimg" src="'+thumb(cimg,72)+'" data-orig="'+esc(cimg)+'">':'')+'<b>'+esc(c[0])+'</b></span>';
         html+='<div class="mss2-block"><div class="mss2-bh" data-v="'+esc(c[0])+'">'+head+'<span class="mss2-arr">Показати всі ('+c[1]+') ›</span></div>';
         hits.forEach(function(h){ html+=card(h); });
         html+='</div>';
@@ -838,7 +842,13 @@
   }
 
   function card(h){
-    var pic=h.picture?('<img class="mss2-thumb" loading="lazy" src="'+thumb(h.picture,120)+'" onerror="this.outerHTML=\'<div class=mss2-ph>—</div>\'">'):'<div class="mss2-ph">—</div>';
+    // Мініатюру тягнемо через wsrv.nl, але сайт за Cloudflare і сторонньому
+    // серверу картинок НЕ віддає (перевірено: будь-який запит без браузера —
+    // 403). Видно лише те, що встигло осісти в кеші wsrv, і з часом таких
+    // менше. Тому data-orig: якщо сервіс не дав, беремо картинку ПРЯМО з
+    // сайту — браузер покупця Cloudflare вже пройшов. Прочерк лишається
+    // третім кроком, коли не вийшло і так.
+    var pic=h.picture?('<img class="mss2-thumb" loading="lazy" src="'+thumb(h.picture,120)+'" data-orig="'+esc(h.picture)+'">'):'<div class="mss2-ph">—</div>';
     var av=h.available?'<span class="mss2-av ok"><span class="mss2-dot ok"></span> В наявності</span>':'<span class="mss2-av off"><span class="mss2-dot off"></span> Немає в наявності</span>';
     var price=h.price?(fmt(h.price)+' грн'):'ціна за запитом';
     var art=h.sku?(' · <span class="mss2-art" data-a="'+esc(h.sku)+'">Код: '+esc(h.sku)+'</span>'):'';
@@ -868,6 +878,19 @@
     results.querySelectorAll('.mss2-chip').forEach(function(c){ c.onclick=function(){ q.value=c.getAttribute('data-q'); onInput(); }; });
   }
 
+  // Помилка завантаження картинки не спливає, тому ловимо на фазі перехоплення.
+  function imgFallback(root){
+    if(!root || root.__laImgFb) return; root.__laImgFb=1;
+    root.addEventListener('error', function(e){
+      var im=e.target;
+      if(!im || im.tagName!=='IMG' || !/mss2-thumb|mss2-catimg/.test(im.className||'')) return;
+      var o=im.getAttribute('data-orig');
+      if(o && !im.getAttribute('data-tried')){ im.setAttribute('data-tried','1'); im.src=o; return; }
+      // іконку категорії просто ховаємо, картку товару замінюємо прочерком
+      if(/mss2-catimg/.test(im.className)) { im.style.display='none'; return; }
+      im.outerHTML='<div class="mss2-ph">—</div>';
+    }, true);
+  }
   function onInput(){
     // Одиниці кирилицею переводимо ОДРАЗУ при введенні — далі весь пошук
     // (кандидати, розширення, коди) працює з однією, латинською формою.
