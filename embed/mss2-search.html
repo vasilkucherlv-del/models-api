@@ -497,7 +497,7 @@
 
     q=modal.querySelector('#mss2-q'); side=modal.querySelector('#mss2-side'); results=modal.querySelector('#mss2-results');
     gridEl=modal.querySelector('.mss2-grid');
-    imgFallback(results); imgFallback(side);
+    imgFallback(document);   // на document — щоб не залежати від структури розмітки
     countEl=modal.querySelector('#mss2-count'); noteEl=modal.querySelector('#mss2-note');
     catToggle=modal.querySelector('#mss2-cattoggle');
     catToggle.onclick=function(){ var open=gridEl.classList.toggle('mss2-catopen'); catToggle.querySelector('.mss2-arw').textContent=open?'▴':'▾'; };

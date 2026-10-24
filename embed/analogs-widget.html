@@ -438,6 +438,10 @@
     if(!connected(mount)) insertOwnBlock(mount,list);
   }
   // Помилка завантаження картинки не спливає — ловимо на фазі перехоплення.
+  // Слухаємо на document, а не на блоці з картками: кругла іконка в згорнутому
+  // заголовку (la-stk) лежить ПОЗА ним, тож її помилку слухач блоку не бачив —
+  // іконка так і лишалась порожнім кружечком. Чужі картинки не зачіпаємо:
+  // обробник реагує лише на свої класи.
   function imgFallback(root){
     if(!root || root.__laImgFb) return; root.__laImgFb=1;
     root.addEventListener('error', function(e){
@@ -456,7 +460,7 @@
     // display:none, і чіпати їх не можна.
     var pnl=mount.closest?mount.closest('[data-content-id]'):null;
     if(pnl){ unhideEl(pnl); unhideEl(tabFor(pnl)); }
-    css(); imgFallback(mount);
+    css(); imgFallback(document);
     var html='<div class="la-wrap">';
     list.slice(0,SHOW).forEach(function(x){ html+=card(x.h); });
     if(list.length>SHOW) html+='<button type="button" class="la-more">'+T.more+' ('+(list.length-SHOW)+')</button>';
