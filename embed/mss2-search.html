@@ -880,7 +880,10 @@
 
   // Помилка завантаження картинки не спливає, тому ловимо на фазі перехоплення.
   function imgFallback(root){
-    if(!root || root.__laImgFb) return; root.__laImgFb=1;
+    // Позначка СВОЯ для кожного віджета: обидва вішають слухач на document,
+    // і зі спільним іменем той, що стартував другим, мовчки не підключався —
+    // у пошуку картинки лишались битими навіть без прочерку.
+    if(!root || root.__mssImgFb) return; root.__mssImgFb=1;
     root.addEventListener('error', function(e){
       var im=e.target;
       if(!im || im.tagName!=='IMG' || !/mss2-thumb|mss2-catimg/.test(im.className||'')) return;

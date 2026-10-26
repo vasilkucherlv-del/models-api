@@ -443,6 +443,8 @@
   // іконка так і лишалась порожнім кружечком. Чужі картинки не зачіпаємо:
   // обробник реагує лише на свої класи.
   function imgFallback(root){
+    // Позначка СВОЯ для кожного віджета (див. те саме в mss2-search):
+    // спільне імʼя на document не давало другому слухачеві підключитись.
     if(!root || root.__laImgFb) return; root.__laImgFb=1;
     root.addEventListener('error', function(e){
       var im=e.target;
