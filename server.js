@@ -231,6 +231,11 @@ app.get('/widget.js', (req, res) => {
       + 'for(var i=0;i<tabs.length;i++){var tt=norm2(tabs[i].textContent);'
       + 'if(TT.indexOf(tt)>=0){var id=(tabs[i].getAttribute(\'href\')||\'\').replace(/^#/,\'\');'
       + 'if(id){var b=document.querySelector(\'[data-content-id="\'+id+\'"]\')||document.getElementById(id);if(b)return b;}}}'
+      // Мобільна версія: вкладок немає, кожна характеристика — окремий блок із заголовком.
+      // Монтуємо у вміст блока «Сумісні моделі» (заголовок лишається), щоб не було дубля.
+      + 'var mb=document.querySelectorAll(\'.j-product-block\');'
+      + 'for(var k=0;k<mb.length;k++){var tl=mb[k].querySelector(\'.j-product-block-title\');'
+      + 'if(tl&&TT.indexOf(norm2(tl.textContent))>=0&&tl.nextElementSibling)return tl.nextElementSibling;}'
       + 'var bl=document.querySelectorAll(\'[data-content-id], .j-product-block__tab, .product__section\');'
       + 'for(var j=0;j<bl.length;j++){var tx=norm2(bl[j].textContent).slice(0,80);if(/сум[іи]сн|совмест/.test(tx)&&/модел/.test(tx))return bl[j];}'
       + 'return null;}'
