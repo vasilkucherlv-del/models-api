@@ -1,0 +1,70 @@
+<!--
+  ГЛОБАЛЬНИЙ скрипт "Чіткі фото" для Horoshop.
+  Ставиться ОДИН раз у глобальне місце теми (поруч з іншими скриптами).
+
+  Навіщо: Horoshop віддає фото рівно під CSS-розмір (картка 600px, каталог 310px),
+  а на телефонах і ретіна-екранах точок у 2–3 рази більше — фото виглядає милом.
+  Horoshop нарізає будь-який розмір за адресою /content/images/N/ШxВпараметри/файл,
+  тож скрипт додає до кожного фото варіант подвійного розміру (srcset 2x).
+  Браузер сам бере його ЛИШЕ на щільних екранах; звичайні монітори качають як раніше.
+
+  Що чіпає: <img> з /content/images/ і фон другого фото в каталозі (catalogCard-image-bg).
+  Що НЕ чіпає: фото, де вже є srcset (лого), дрібні іконки (< 100px).
+  Нові фото (підвантаження каталогу, фільтри) і заміну src у галереї обробляє теж.
+-->
+<script>
+(function(){
+  if((window.devicePixelRatio||1) < 1.5) return;   // звичайний екран — нічого не треба
+
+  var RE = /(\/content\/images\/\d+\/)(\d+)x(\d+)([a-z][a-z0-9]*\/[^"'()\s?#]+)/i;
+  var MIN = 100;
+
+  function big(url){
+    var m = RE.exec(url||'');
+    if(!m || +m[2] < MIN) return null;
+    return url.replace(RE, m[1] + (m[2]*2) + 'x' + (m[3]*2) + m[4]);
+  }
+
+  function fixImg(img){
+    var src = img.getAttribute('src'), mark = img.getAttribute('data-sharp');
+    if(mark === src || (!mark && img.hasAttribute('srcset'))) return;
+    var b = big(src);
+    if(!b){ if(mark){ img.removeAttribute('srcset'); img.removeAttribute('data-sharp'); } return; }
+    img.setAttribute('data-sharp', src);
+    img.setAttribute('srcset', src + ' 1x, ' + b + ' 2x');
+  }
+
+  function fixBg(el){
+    if(el.getAttribute('data-sharp')) return;
+    var m = /url\(["']?([^"')]+)["']?\)/.exec(el.style.backgroundImage||''), b = m && big(m[1]);
+    if(!b) return;
+    el.setAttribute('data-sharp', '1');
+    el.style.backgroundImage = 'image-set(url("' + m[1] + '") 1x, url("' + b + '") 2x)';
+  }
+
+  function scan(root){
+    if(!root || root.nodeType !== 1) return;
+    if(root.tagName === 'IMG') return fixImg(root);
+    var a = root.querySelectorAll('img[src*="/content/images/"]');
+    for(var i=0;i<a.length;i++) fixImg(a[i]);
+    var bg = root.querySelectorAll('.catalogCard-image-bg');
+    for(var j=0;j<bg.length;j++) fixBg(bg[j]);
+  }
+
+  function boot(){
+    try {
+      scan(document.body);
+      new MutationObserver(function(list){
+        try {
+          for(var i=0;i<list.length;i++){
+            if(list[i].type === 'attributes'){ fixImg(list[i].target); continue; }
+            var n = list[i].addedNodes;
+            for(var j=0;j<n.length;j++) scan(n[j]);
+          }
+        } catch(e){ /* тихо */ }
+      }).observe(document.body, {childList:true, subtree:true, attributes:true, attributeFilter:['src']});
+    } catch(e){ /* тихо */ }
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+})();
+</script>
