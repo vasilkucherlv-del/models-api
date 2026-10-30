@@ -63,6 +63,12 @@ const T = {
       'якщо сумніваєтесь, напишіть нам номер моделі, і менеджер підтвердить, що деталь підійде.',
     other: (b) => 'Інші моделі ' + b,
     all: 'Усі моделі техніки',
+    allBrand: (b) => 'Усі моделі ' + b,
+    brandsH: 'Бренди', popular: 'Популярні моделі',
+    brandH: (b) => 'Запчастини для техніки ' + b + ' за моделлю',
+    brandIntro: (b, n) => `Оберіть свою модель ${b} — покажемо запчастини, які до неї підходять. Тут ${n} ${plural(n, 'модель', 'моделі', 'моделей')}, згрупованих за типом техніки. Номер моделі шукайте на шильдику приладу.`,
+    brandDesc: (b, n) => `Запчастини для техніки ${b} за моделлю: ${n} ${plural(n, 'модель', 'моделі', 'моделей')} — пральні машини, холодильники, пилососи та інше. Доставка по Україні — LARTEK.`,
+    otherType: 'Інша техніка',
     hubIntro: 'Оберіть бренд і модель своєї техніки — покажемо всі запчастини, які до неї підходять. ' +
       'Номер моделі зазвичай написаний на шильдику: на задній стінці, під кришкою або на дні приладу.',
     notFound: 'Модель не знайдено', notFoundText: 'Такої сторінки немає. Перегляньте список моделей або скористайтеся пошуком на сайті.',
@@ -80,6 +86,12 @@ const T = {
       'если сомневаетесь, напишите нам номер модели, и менеджер подтвердит, что деталь подойдёт.',
     other: (b) => 'Другие модели ' + b,
     all: 'Все модели техники',
+    allBrand: (b) => 'Все модели ' + b,
+    brandsH: 'Бренды', popular: 'Популярные модели',
+    brandH: (b) => 'Запчасти для техники ' + b + ' по модели',
+    brandIntro: (b, n) => `Выберите свою модель ${b} — покажем запчасти, которые к ней подходят. Здесь ${n} ${plural(n, 'модель', 'модели', 'моделей')}, сгруппированных по типу техники. Номер модели ищите на шильдике прибора.`,
+    brandDesc: (b, n) => `Запчасти для техники ${b} по модели: ${n} ${plural(n, 'модель', 'модели', 'моделей')} — стиральные машины, холодильники, пылесосы и другое. Доставка по Украине — LARTEK.`,
+    otherType: 'Другая техника',
     hubIntro: 'Выберите бренд и модель своей техники — покажем все запчасти, которые к ней подходят. ' +
       'Номер модели обычно указан на шильдике: на задней стенке, под крышкой или на дне прибора.',
     notFound: 'Модель не найдена', notFoundText: 'Такой страницы нет. Посмотрите список моделей или воспользуйтесь поиском на сайте.',
@@ -274,7 +286,7 @@ function renderModel(idx, products, slug, lang) {
     `<ul class="lmp-grid">${items.map((p) => card(p, lang)).join('')}</ul>` +
     (other.length ? `<h2 class="lmp-h">${esc(t.other(m.brand))}</h2><ul class="lmp-links">` +
       other.map((o) => `<li><a href="${pathFor(lang, o.slug)}">${esc(modelName(o))}</a></li>`).join('') + '</ul>' : '') +
-    `<p><a href="${pathFor(lang)}">${t.all} →</a></p>`;
+    `<p><a href="${pathFor(lang, slugPart(m.brand))}">${esc(t.allBrand(m.brand))} →</a></p>`;
 
   const self = pathFor(lang, slug);
   const ld = [
@@ -288,26 +300,31 @@ function renderModel(idx, products, slug, lang) {
     description: t.desc(full, items.length, minPrice, kinds),
     h1, html, robots: 'index, follow',
     canonical: SITE + self, alternates: alternates(slug),
-    ...crumbsOut(crumbs(lang, [{ name: t.home }, { name: t.hub, url: pathFor(lang) }, { name: name, self }])),
+    ...crumbsOut(crumbs(lang, [{ name: t.home }, { name: t.hub, url: pathFor(lang) }, { name: m.brand, url: pathFor(lang, slugPart(m.brand)) }, { name: name, self }])),
     jsonld: ld,
   };
 }
 
-function renderHub(idx, lang) {
-  const t = T[lang];
+function brandsOf(idx) {
   const byBrand = new Map();
   for (const m of idx.list) {
-    const k = m.brand.toUpperCase();
-    if (!byBrand.has(k)) byBrand.set(k, { brand: m.brand, list: [] });
+    const k = slugPart(m.brand);
+    if (!byBrand.has(k)) byBrand.set(k, { slug: k, brand: m.brand, list: [] });
     byBrand.get(k).list.push(m);
   }
-  const brands = [...byBrand.values()].sort((a, b) => a.brand.localeCompare(b.brand));
+  return byBrand;
+}
+
+// Головна сторінка розділу: лише бренди + популярні моделі (легка; повні списки — на сторінках брендів).
+function renderHub(idx, lang) {
+  const t = T[lang];
+  const brands = [...brandsOf(idx).values()].sort((a, b) => b.list.length - a.list.length || a.brand.localeCompare(b.brand));
   const html = STYLE +
     `<p class="lmp-intro">${t.hubIntro}</p>` +
-    `<ul class="lmp-links">${brands.map((b) => `<li><a href="#b-${slugPart(b.brand)}">${esc(b.brand)} (${b.list.length})</a></li>`).join('')}</ul>` +
-    brands.map((b) => `<div class="lmp-brand" id="b-${slugPart(b.brand)}"><h2>${esc(b.brand)}</h2><ul class="lmp-links">` +
-      b.list.slice().sort((x, y) => x.model.localeCompare(y.model))
-        .map((m) => `<li><a href="${pathFor(lang, m.slug)}">${esc(m.model)}</a></li>`).join('') + '</ul></div>').join('');
+    `<h2 class="lmp-h">${t.brandsH}</h2><ul class="lmp-links">` +
+    brands.map((b) => `<li><a href="${pathFor(lang, b.slug)}">${esc(b.brand)} (${b.list.length})</a></li>`).join('') + '</ul>' +
+    `<h2 class="lmp-h">${t.popular}</h2><ul class="lmp-links">` +
+    idx.list.slice(0, 40).map((m) => `<li><a href="${pathFor(lang, m.slug)}">${esc(modelName(m))}</a></li>`).join('') + '</ul>';
   const self = pathFor(lang);
   return {
     status: 200,
@@ -316,6 +333,34 @@ function renderHub(idx, lang) {
     h1: t.hub, html, robots: 'index, follow',
     canonical: SITE + self, alternates: alternates(''),
     ...crumbsOut(crumbs(lang, [{ name: t.home }, { name: t.hub, self }])),
+    jsonld: [],
+  };
+}
+
+// Сторінка бренду: усі його моделі, згруповані за типом техніки.
+function renderBrand(idx, b, lang) {
+  const t = T[lang];
+  const groups = new Map();
+  for (const m of b.list) {
+    const g = typeGen(m, lang) || '';
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(m);
+  }
+  const order = [...groups.entries()].sort((x, y) => y[1].length - x[1].length);
+  const html = STYLE +
+    `<p class="lmp-intro">${esc(t.brandIntro(b.brand, b.list.length))}</p>` +
+    order.map(([g, list]) => `<h2 class="lmp-h">${esc(g ? t.parts + ' ' + g + ' ' + b.brand : t.otherType)} (${list.length})</h2><ul class="lmp-links">` +
+      list.slice().sort((x, y) => x.model.localeCompare(y.model))
+        .map((m) => `<li><a href="${pathFor(lang, m.slug)}">${esc(m.model)}</a></li>`).join('') + '</ul>').join('') +
+    `<p><a href="${pathFor(lang)}">${t.all} →</a></p>`;
+  const self = pathFor(lang, b.slug);
+  return {
+    status: 200,
+    title: t.brandH(b.brand) + t.titleTail,
+    description: t.brandDesc(b.brand, b.list.length),
+    h1: t.brandH(b.brand), html, robots: 'index, follow',
+    canonical: SITE + self, alternates: alternates(b.slug),
+    ...crumbsOut(crumbs(lang, [{ name: t.home }, { name: t.hub, url: pathFor(lang) }, { name: b.brand, self }])),
     jsonld: [],
   };
 }
@@ -336,7 +381,7 @@ function renderNotFound(lang, slug) {
 }
 
 function renderSitemap(idx) {
-  const urls = [''].concat(idx.list.map((m) => m.slug));
+  const urls = [''].concat([...brandsOf(idx).keys()], idx.list.map((m) => m.slug));
   const body = urls.map((s) => {
     const a = alternates(s);
     const alt = `<xhtml:link rel="alternate" hreflang="uk" href="${a.uk}"/><xhtml:link rel="alternate" hreflang="ru" href="${a.ru}"/>`;
@@ -392,7 +437,8 @@ function register(app, pool) {
     try {
       const s = await load(pool);
       const slug = String(req.query.slug || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
-      const out = slug ? renderModel(s.idx, s.products, slug, lang(req)) : renderHub(s.idx, lang(req));
+      const br = slug && brandsOf(s.idx).get(slug);
+      const out = !slug ? renderHub(s.idx, lang(req)) : br ? renderBrand(s.idx, br, lang(req)) : renderModel(s.idx, s.products, slug, lang(req));
       res.set('Cache-Control', 'public, max-age=1800');
       res.json(out);
     } catch (e) {
@@ -425,4 +471,4 @@ function register(app, pool) {
   });
 }
 
-module.exports = { register, parseFeed, buildIndex, renderModel, renderHub, renderSitemap, makeSlug, plural };
+module.exports = { register, parseFeed, buildIndex, renderModel, renderHub, renderBrand, brandsOf, renderSitemap, makeSlug, plural };
