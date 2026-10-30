@@ -64,7 +64,9 @@ const T = {
     other: (b) => 'Інші моделі ' + b,
     all: 'Усі моделі техніки',
     allBrand: (b) => 'Усі моделі ' + b,
-    brandsH: 'Бренди', popular: 'Популярні моделі',
+    brandsH: 'Бренди', pick: 'Підібрати за моделлю', pType: 'Тип техніки', pBrand: 'Бренд', pModel: 'Модель', pBtn: 'Показати запчастини', pAny: 'Оберіть…', pNo: 'Для цієї моделі ще немає сторінки — скористайтеся пошуком на сайті або напишіть менеджеру.',
+    stModels: 'моделей техніки', stBrands: 'брендів', stProducts: 'товарів із перевіреною сумісністю',
+    plate: 'Де знайти номер моделі', plateText: 'На шильдику приладу: у пральної машини — за люком або на задній стінці, у холодильника — всередині камери, у пилососа й кухонної техніки — на дні корпусу. Вводьте модель так, як на шильдику — підказки з’являться під час набору.',
     brandH: (b) => 'Запчастини для техніки ' + b + ' за моделлю',
     brandIntro: (b, n) => `Оберіть свою модель ${b} — покажемо запчастини, які до неї підходять. Тут ${n} ${plural(n, 'модель', 'моделі', 'моделей')}, згрупованих за типом техніки. Номер моделі шукайте на шильдику приладу.`,
     brandDesc: (b, n) => `Запчастини для техніки ${b} за моделлю: ${n} ${plural(n, 'модель', 'моделі', 'моделей')} — пральні машини, холодильники, пилососи та інше. Доставка по Україні — LARTEK.`,
@@ -87,7 +89,9 @@ const T = {
     other: (b) => 'Другие модели ' + b,
     all: 'Все модели техники',
     allBrand: (b) => 'Все модели ' + b,
-    brandsH: 'Бренды', popular: 'Популярные модели',
+    brandsH: 'Бренды', pick: 'Подобрать по модели', pType: 'Тип техники', pBrand: 'Бренд', pModel: 'Модель', pBtn: 'Показать запчасти', pAny: 'Выберите…', pNo: 'Для этой модели ещё нет страницы — воспользуйтесь поиском на сайте или напишите менеджеру.',
+    stModels: 'моделей техники', stBrands: 'брендов', stProducts: 'товаров с проверенной совместимостью',
+    plate: 'Где найти номер модели', plateText: 'На шильдике прибора: у стиральной машины — за люком или на задней стенке, у холодильника — внутри камеры, у пылесоса и кухонной техники — на дне корпуса. Вводите модель так, как на шильдике — подсказки появятся при наборе.',
     brandH: (b) => 'Запчасти для техники ' + b + ' по модели',
     brandIntro: (b, n) => `Выберите свою модель ${b} — покажем запчасти, которые к ней подходят. Здесь ${n} ${plural(n, 'модель', 'модели', 'моделей')}, сгруппированных по типу техники. Номер модели ищите на шильдике прибора.`,
     brandDesc: (b, n) => `Запчасти для техники ${b} по модели: ${n} ${plural(n, 'модель', 'модели', 'моделей')} — стиральные машины, холодильники, пылесосы и другое. Доставка по Украине — LARTEK.`,
@@ -236,6 +240,14 @@ const STYLE = '<style>' +
   '.lmp-links a:hover{border-color:#999}' +
   '.lmp-brand{margin:0 0 18px}.lmp-brand h2{font-size:18px;margin:0 0 8px}' +
   '@media(max-width:600px){.lmp-grid{grid-template-columns:repeat(2,1fr);gap:8px}.lmp-card{padding:8px}.lmp-card img{height:110px}.lmp-p{font-size:15px}}' +
+  '.lmp-pick{border:1px solid #e6e6e6;border-radius:10px;padding:18px;margin:0 0 24px;background:#fafafa}' +
+  '.lmp-pick h2{font-size:18px;margin:0 0 12px}.lmp-row{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end}' +
+  '.lmp-row label{display:block;font-size:13px;color:#666;margin-bottom:4px}.lmp-row select,.lmp-row input{width:100%;height:40px;border:1px solid #ccc;border-radius:6px;padding:0 10px;font-size:15px;background:#fff}' +
+  '.lmp-row button{height:40px;padding:0 18px;border:0;border-radius:6px;background:#1a56a8;color:#fff;font-size:15px;cursor:pointer;white-space:nowrap}.lmp-row button:disabled{background:#aaa;cursor:default}' +
+  '.lmp-msg{font-size:13px;color:#b00;margin-top:8px;min-height:1em}' +
+  '.lmp-stats{display:flex;gap:14px;flex-wrap:wrap;margin:0 0 24px;padding:0;list-style:none}.lmp-stats li{flex:1 1 150px;border:1px solid #e6e6e6;border-radius:10px;padding:14px;text-align:center}' +
+  '.lmp-stats b{display:block;font-size:26px;color:#1a56a8}.lmp-stats span{font-size:13px;color:#666}' +
+  '@media(max-width:600px){.lmp-row{grid-template-columns:1fr}.lmp-stats b{font-size:22px}}' +
   '</style>';
 
 function thumb(pic) {
@@ -316,15 +328,32 @@ function brandsOf(idx) {
 }
 
 // Головна сторінка розділу: лише бренди + популярні моделі (легка; повні списки — на сторінках брендів).
-function renderHub(idx, lang) {
+function renderHub(idx, products, lang) {
   const t = T[lang];
   const brands = [...brandsOf(idx).values()].sort((a, b) => b.list.length - a.list.length || a.brand.localeCompare(b.brand));
-  const html = STYLE +
-    `<p class="lmp-intro">${t.hubIntro}</p>` +
+  const nProducts = new Set(idx.list.flatMap((m) => m.skus)).size;
+  const fmt = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '\u2009');
+  const api = (process.env.PUBLIC_API_URL || 'https://models-api-production-4d71.up.railway.app').replace(/\/$/, '');
+  const picker = `<div class="lmp-pick"><h2>${t.pick}</h2><div class="lmp-row">` +
+    `<div><label>${t.pType}</label><select id="lmp-t"><option value="">${t.pAny}</option></select></div>` +
+    `<div><label>${t.pBrand}</label><select id="lmp-b" disabled><option value="">${t.pAny}</option></select></div>` +
+    `<div><label>${t.pModel}</label><input id="lmp-m" list="lmp-ml" disabled autocomplete="off"><datalist id="lmp-ml"></datalist></div>` +
+    `<div><button id="lmp-go" disabled>${t.pBtn}</button></div></div><div class="lmp-msg" id="lmp-msg"></div></div>` +
+    `<script>(function(){var A=${JSON.stringify(api)},L=${JSON.stringify(lang)},P=${JSON.stringify(pathFor(lang))};` +
+    `var T=document.getElementById('lmp-t'),B=document.getElementById('lmp-b'),M=document.getElementById('lmp-m'),DL=document.getElementById('lmp-ml'),G=document.getElementById('lmp-go'),MS=document.getElementById('lmp-msg');var D=null,models=[];` +
+    `function opt(sel,list,ph){sel.innerHTML='<option value=\"\">'+ph+'</option>'+list.map(function(x){return '<option value=\"'+x[0]+'\">'+x[1]+'</option>'}).join('');}` +
+    `fetch(A+'/model-pages/picker?lang='+L).then(function(r){return r.json()}).then(function(d){D=d;opt(T,d.types,${JSON.stringify(t.pAny)});});` +
+    `T.onchange=function(){B.disabled=!T.value;M.disabled=true;M.value='';G.disabled=true;if(T.value){opt(B,D.brands[T.value]||[],${JSON.stringify(t.pAny)});}};` +
+    `B.onchange=function(){M.value='';G.disabled=true;if(!B.value){M.disabled=true;return;}fetch(A+'/model-pages/picker?lang='+L+'&type='+T.value+'&brand='+B.value).then(function(r){return r.json()}).then(function(l){models=l;DL.innerHTML=l.map(function(x){return '<option value=\"'+x[0].replace(/"/g,'&quot;')+'\">'}).join('');M.disabled=false;M.focus();});};` +
+    `function find(){var v=M.value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');if(!v)return null;var ex=models.filter(function(x){return x[0].toUpperCase().replace(/[^A-Z0-9]/g,'')===v});if(ex.length)return ex[0];var st=models.filter(function(x){return x[0].toUpperCase().replace(/[^A-Z0-9]/g,'').indexOf(v)===0});return st.length===1?st[0]:null;}` +
+    `M.oninput=function(){G.disabled=!find();MS.textContent='';};` +
+    `function go(){var f=find();if(f){location.href=P+f[1]+'/';}else if(M.value.trim()){MS.textContent=${JSON.stringify(t.pNo)};}}` +
+    `G.onclick=go;M.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();go();}};})();</script>`;
+  const html = STYLE + picker +
+    `<ul class="lmp-stats"><li><b>${fmt(idx.list.length)}</b><span>${t.stModels}</span></li><li><b>${brands.length}</b><span>${t.stBrands}</span></li><li><b>${fmt(nProducts)}</b><span>${t.stProducts}</span></li></ul>` +
     `<h2 class="lmp-h">${t.brandsH}</h2><ul class="lmp-links">` +
     brands.map((b) => `<li><a href="${pathFor(lang, b.slug)}">${esc(b.brand)} (${b.list.length})</a></li>`).join('') + '</ul>' +
-    `<h2 class="lmp-h">${t.popular}</h2><ul class="lmp-links">` +
-    idx.list.slice(0, 40).map((m) => `<li><a href="${pathFor(lang, m.slug)}">${esc(modelName(m))}</a></li>`).join('') + '</ul>';
+    `<h2 class="lmp-h">${t.plate}</h2><p class="lmp-intro">${t.plateText}</p>`;
   const self = pathFor(lang);
   return {
     status: 200,
@@ -334,6 +363,27 @@ function renderHub(idx, lang) {
     canonical: SITE + self, alternates: alternates(''),
     ...crumbsOut(crumbs(lang, [{ name: t.home }, { name: t.hub, self }])),
     jsonld: [],
+  };
+}
+
+// Дані для форми підбору: типи й бренди (без параметрів) або моделі (type + brand).
+function pickerData(idx, lang, type, brand) {
+  const li = lang === 'ru' ? 1 : 0;
+  if (type && brand) {
+    return idx.list.filter((m) => String(m.type) === String(type) && slugPart(m.brand) === brand)
+      .map((m) => [m.model, m.slug]).sort((a, b) => a[0].localeCompare(b[0]));
+  }
+  const types = {}, brands = {};
+  for (const m of idx.list) {
+    if (!m.type) continue;
+    types[m.type] = (types[m.type] || 0) + 1;
+    const bs = slugPart(m.brand);
+    (brands[m.type] = brands[m.type] || {})[bs] = m.brand;
+  }
+  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  return {
+    types: Object.keys(types).sort((a, b) => types[b] - types[a]).map((id) => [id, cap(TYPES[id][li])]),
+    brands: Object.fromEntries(Object.entries(brands).map(([id, o]) => [id, Object.entries(o).sort((a, b) => a[1].localeCompare(b[1]))])),
   };
 }
 
@@ -438,11 +488,20 @@ function register(app, pool) {
       const s = await load(pool);
       const slug = String(req.query.slug || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
       const br = slug && brandsOf(s.idx).get(slug);
-      const out = !slug ? renderHub(s.idx, lang(req)) : br ? renderBrand(s.idx, br, lang(req)) : renderModel(s.idx, s.products, slug, lang(req));
+      const out = !slug ? renderHub(s.idx, s.products, lang(req)) : br ? renderBrand(s.idx, br, lang(req)) : renderModel(s.idx, s.products, slug, lang(req));
       res.set('Cache-Control', 'public, max-age=1800');
       res.json(out);
     } catch (e) {
       console.error(e);
+      res.status(503).json({ error: 'unavailable' });
+    }
+  });
+  app.get('/model-pages/picker', async (req, res) => {
+    try {
+      const s = await load(pool);
+      res.set('Cache-Control', 'public, max-age=1800');
+      res.json(pickerData(s.idx, lang(req), String(req.query.type || '').replace(/\D/g, ''), String(req.query.brand || '').toLowerCase().replace(/[^a-z0-9-]/g, '')));
+    } catch (e) {
       res.status(503).json({ error: 'unavailable' });
     }
   });
@@ -471,4 +530,4 @@ function register(app, pool) {
   });
 }
 
-module.exports = { register, parseFeed, buildIndex, renderModel, renderHub, renderBrand, brandsOf, renderSitemap, makeSlug, plural };
+module.exports = { register, parseFeed, buildIndex, renderModel, renderHub, renderBrand, brandsOf, pickerData, renderSitemap, makeSlug, plural };
