@@ -261,8 +261,8 @@ const STYLE = '<style>' +
   '.lmp-a{font-size:13px;color:#2e7d32}.lmp-a.no{color:#999}' +
   '.lmp-h{font-size:20px;margin:24px 0 12px}' +
   '.lmp-links{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 20px;padding:0;list-style:none}' +
-  '.lmp-grid>li,.lmp-links>li{padding-left:0!important;margin-left:0!important}' +
-  '.lmp-grid>li::before,.lmp-links>li::before{content:none!important;display:none!important}' +
+  '.lmp-grid>li,.lmp-links>li,.lmp-stats>li{padding-left:0!important;margin-left:0!important}' +
+  '.lmp-grid>li::before,.lmp-links>li::before,.lmp-stats>li::before{content:none!important;display:none!important}' +
   '.lmp-links a{display:inline-block;padding:6px 10px;border:1px solid #ddd;border-radius:6px;text-decoration:none;color:inherit;font-size:14px}' +
   '.lmp-links a:hover{border-color:#999}' +
   '.lmp-brand{margin:0 0 18px}.lmp-brand h2{font-size:18px;margin:0 0 8px}' +
@@ -372,9 +372,9 @@ function renderHub(idx, products, lang) {
     `function opt(sel,list,ph){sel.innerHTML='<option value=\"\">'+ph+'</option>'+list.map(function(x){return '<option value=\"'+x[0]+'\">'+x[1]+'</option>'}).join('');}` +
     `fetch(A+'/model-pages/picker?lang='+L).then(function(r){return r.json()}).then(function(d){D=d;opt(T,d.types,${JSON.stringify(t.pAny)});});` +
     `T.onchange=function(){B.disabled=!T.value;M.disabled=true;M.value='';G.disabled=true;if(T.value){opt(B,D.brands[T.value]||[],${JSON.stringify(t.pAny)});}};` +
-    `B.onchange=function(){M.value='';G.disabled=true;models=[];DL.innerHTML='';M.disabled=!B.value;if(B.value)M.focus();};` +
-    `var tm=null,last='';function load(){var q=M.value.trim();if(q.length<2||!B.value)return;var key=B.value+'|'+q.toUpperCase().replace(/[^A-Z0-9]/g,'');if(key===last)return;last=key;` +
-    `fetch(A+'/model-pages/picker?lang='+L+'&brand='+B.value+'&q='+encodeURIComponent(q)).then(function(r){return r.json()}).then(function(l){models=l;DL.innerHTML=l.map(function(x){return '<option value=\"'+x[0].replace(/"/g,'&quot;')+'\">'}).join('');G.disabled=!M.value.trim();});}` +
+    `B.onchange=function(){M.value='';G.disabled=true;models=[];DL.innerHTML='';last='';M.disabled=!B.value;if(B.value){load();M.focus();}};` +
+    `var tm=null,last='';function load(){var q=M.value.trim();if(!B.value)return;var key=B.value+'|'+q.toUpperCase().replace(/[^A-Z0-9]/g,'');if(key===last)return;last=key;` +
+    `fetch(A+'/model-pages/picker?lang='+L+'&brand='+B.value+'&type='+T.value+'&q='+encodeURIComponent(q)).then(function(r){return r.json()}).then(function(l){models=l;DL.innerHTML=l.map(function(x){return '<option value=\"'+x[0].replace(/"/g,'&quot;')+'\">'}).join('');G.disabled=!M.value.trim();});}` +
     `function norm(x){return String(x).toUpperCase().replace(/[^A-Z0-9]/g,'');}` +
     `function find(){var v=norm(M.value);if(!v)return null;var ex=models.filter(function(x){return norm(x[0])===v});if(ex.length)return ex[0];var st=models.filter(function(x){return norm(x[0]).indexOf(v)===0});return st.length===1?st[0]:null;}` +
     `M.oninput=function(){MS.textContent='';G.disabled=!M.value.trim();clearTimeout(tm);tm=setTimeout(load,200);};` +
@@ -418,10 +418,15 @@ async function dynamicModel(pool, idx, products, slug) {
   return null;
 }
 
-async function pickerModels(pool, idx, brand, q) {
+async function pickerModels(pool, idx, brand, q, type) {
   const bname = ([...brandsOf(idx).values()].find((b) => b.slug === brand) || {}).brand;
   if (!bname) return [];
   const qn = String(q || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  // Без запиту — список моделей бренду цього типу з індексу (щоб покупець бачив варіанти одразу).
+  if (!qn) {
+    return idx.list.filter((m) => slugPart(m.brand) === brand && (!type || String(m.type) === String(type)))
+      .slice(0, 150).sort((a, b) => a.model.localeCompare(b.model)).map((m) => [m.model, m.slug]);
+  }
   const r = await pool.query(
     `SELECT model, model_norm FROM compatibility WHERE upper(brand) = $1 AND model_norm LIKE $2
       GROUP BY model, model_norm ORDER BY count(*) DESC, model LIMIT 60`, [bname.toUpperCase(), qn + '%']);
@@ -560,7 +565,7 @@ function register(app, pool) {
       const s = await load(pool);
       res.set('Cache-Control', 'public, max-age=1800');
       const brand = String(req.query.brand || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
-      if (brand && req.query.q !== undefined) return res.json(await pickerModels(pool, s.idx, brand, req.query.q));
+      if (brand && req.query.q !== undefined) return res.json(await pickerModels(pool, s.idx, brand, req.query.q, String(req.query.type || '').replace(/\D/g, '')));
       res.json(pickerData(s.idx, lang(req)));
     } catch (e) {
       res.status(503).json({ error: 'unavailable' });

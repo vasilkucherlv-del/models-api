@@ -88,6 +88,7 @@ assert.deepStrictEqual(pd.brands['1185'], [['lg', 'LG']]);
 const { pickerModels } = require('../model-pages');
 const fakePool = { query: async (sql, p) => { assert.strictEqual(p[0], 'LG'); assert.strictEqual(p[1], 'F10%'); return { rows: [{ model: 'F1020TD5', model_norm: 'F1020TD5' }, { model: 'F10B8ND', model_norm: 'F10B8ND' }] }; } };
 assert.deepStrictEqual(await pickerModels(fakePool, idx, 'lg', 'f10'), [['F1020TD5', 'lg-f1020td5'], ['F10B8ND', 'lg-f10b8nd']], 'кожна модель має адресу сторінки');
+assert.deepStrictEqual(await pickerModels(fakePool, idx, 'lg', '', '1185'), [['F1020TD5', 'lg-f1020td5'], ['F12B8', 'lg-f12b8'], ['F14B8', 'lg-f14b8']], 'без запиту — список моделей бренду з індексу');
 const { dynamicModel } = require('../model-pages');
 const pool2 = { query: async (sql, p) => { assert.deepStrictEqual(p, ['LG', 'F10B8ND']); return { rows: [{ model: 'F10B8ND', skus: ['0101', '9999'] }] }; } };
 const dyn = await dynamicModel(pool2, idx, products, 'lg-f10b8nd');
