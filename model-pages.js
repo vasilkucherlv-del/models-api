@@ -17,6 +17,7 @@ const RU_FEED = process.env.RU_FEED_URL ||
   'https://lartek.com.ua/content/export/4afcdcba6dc44bbcf68db6be51f8d018.xml';
 const LIMIT = parseInt(process.env.MODEL_PAGES_LIMIT || '1000', 10);
 const MIN_PRODUCTS = parseInt(process.env.MODEL_PAGES_MIN || '3', 10);
+const PER_BRAND = parseInt(process.env.MODEL_PAGES_PER_BRAND || '150', 10);
 const TTL_MS = 6 * 60 * 60 * 1000;
 
 // Тип техніки за категорією-«запчастини для …» (родовий відмінок, однина).
@@ -141,21 +142,36 @@ function parseFeed(xml) {
 function buildIndex(rows, products, limit = LIMIT, min = MIN_PRODUCTS) {
   const list = [];
   const seen = new Set();
+  const seenSet = new Map();
   for (const r of rows) {
     if (!/\d/.test(r.model_norm) || r.model_norm.length < 3 || !r.brand) continue;
     const skus = [...new Set(r.skus)].filter((s) => products.has(s));
     if (skus.length < min) continue;
+    if (!slugPart(r.brand)) continue;
     const slug = makeSlug(r.brand, r.model_norm);
     if (!slug || seen.has(slug)) continue;
+    // Однаковий набір товарів = однакова сторінка (варіанти моделі на кшталт ...RU/...UA).
+    // Лишаємо одну — з найкоротшою назвою, щоб не плодити дублі для Google.
+    const key = r.brand.toUpperCase() + '|' + skus.slice().sort().join(',');
+    if (seenSet.has(key)) { const prev = seenSet.get(key); if (r.model.length < prev.model.length) { prev.model = r.model; prev.slug = slug; } continue; }
     seen.add(slug);
     // тип техніки — найчастіший серед товарів моделі
     const cnt = {};
     for (const s of skus) { const t = products.get(s).type; if (t) cnt[t] = (cnt[t] || 0) + 1; }
     const type = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0] || null;
-    list.push({ slug, brand: r.brand, model: r.model, skus, type: type ? Number(type) : null });
+    const item = { slug, brand: r.brand, model: r.model, skus, type: type ? Number(type) : null };
+    seenSet.set(key, item);
+    list.push(item);
   }
   list.sort((a, b) => b.skus.length - a.skus.length || a.slug.localeCompare(b.slug));
-  const top = list.slice(0, limit);
+  // Не більше PER_BRAND сторінок на бренд — інакше топ забивають варіанти двох-трьох брендів.
+  const perBrand = {}, top = [];
+  for (const m of list) {
+    const b = m.brand.toUpperCase();
+    if ((perBrand[b] = (perBrand[b] || 0) + 1) > PER_BRAND) continue;
+    top.push(m);
+    if (top.length >= limit) break;
+  }
   return { list: top, bySlug: new Map(top.map((m) => [m.slug, m])) };
 }
 
@@ -353,7 +369,7 @@ async function load(pool) {
   if (state.loading) return state.idx ? state : state.loading;
   state.loading = (async () => {
     try {
-      const [xml, db] = await Promise.all([fetchFeed(), pool.query(MODELS_SQL, [MIN_PRODUCTS, LIMIT * 4])]);
+      const [xml, db] = await Promise.all([fetchFeed(), pool.query(MODELS_SQL, [MIN_PRODUCTS, LIMIT * 40])]);
       const products = parseFeed(xml);
       const idx = buildIndex(db.rows, products);
       state = { at: Date.now(), idx, products, loading: null };
