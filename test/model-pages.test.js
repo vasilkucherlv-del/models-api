@@ -74,11 +74,20 @@ const nf = renderModel(idx, products, 'lg-nope', 'uk');
 assert.strictEqual(nf.status, 404);
 assert.strictEqual(nf.robots, 'noindex, follow');
 
+const { renderBrand, brandsOf } = require('../model-pages');
 const hub = renderHub(idx, 'uk');
+assert.ok(hub.html.includes('/modeli/lg/'), 'хаб веде на сторінку бренду');
+const lg = brandsOf(idx).get('lg');
+const bp = renderBrand(idx, lg, 'uk');
+assert.strictEqual(bp.h1, 'Запчастини для техніки LG за моделлю');
+assert.ok(bp.html.includes('/modeli/lg-f12b8/') && bp.html.includes('пральної машини LG'), 'моделі згруповані за типом');
+assert.strictEqual(bp.canonical, 'https://lartek.com.ua/modeli/lg/');
+assert.ok(uk.breadcrumbs_desktop.includes('/modeli/lg/'), 'у крихтах моделі є бренд');
 assert.ok(hub.html.includes('/modeli/lg-f1020td5/'));
 
 const sm = renderSitemap(idx);
-assert.strictEqual((sm.match(/<url>/g) || []).length, 6, 'хаб + 2 моделі, кожна в UA і RU');
+assert.strictEqual((sm.match(/<url>/g) || []).length, 8, 'хаб + бренд + 2 моделі, кожна в UA і RU');
+assert.ok(sm.includes('/modeli/lg/'), 'сторінка бренду в карті сайту');
 
 // HTML-ін'єкції з назв не проходять
 const evil = parseFeed(xml.replace('Амортизатор для пральної машини LG', 'А<script>x</script>'));
@@ -87,6 +96,6 @@ assert.ok(!renderModel(idx2, evil, 'lg-f1020td5', 'uk').html.includes('<script>x
 
 assert.ok(uk.breadcrumbs.includes('breadcrumbs__list') && uk.breadcrumbs.includes('/modeli/'), 'мобільні крихти');
 assert.ok(uk.breadcrumbs_desktop.includes('breadcrumbs-i') && !uk.breadcrumbs_desktop.includes('breadcrumbs__'), 'десктопні крихти');
-assert.strictEqual((uk.breadcrumbs_desktop.match(/<svg/g) || []).length, 2, 'стрілки між трьома пунктами');
+assert.strictEqual((uk.breadcrumbs_desktop.match(/<svg/g) || []).length, 3, 'стрілки між трьома пунктами');
 
 console.log('model-pages: OK');
