@@ -75,7 +75,13 @@ assert.strictEqual(nf.status, 404);
 assert.strictEqual(nf.robots, 'noindex, follow');
 
 const { renderBrand, brandsOf } = require('../model-pages');
-const hub = renderHub(idx, 'uk');
+const hub = renderHub(idx, products, 'uk');
+const { pickerData } = require('../model-pages');
+assert.ok(hub.html.includes('id="lmp-t"') && hub.html.includes('lmp-stats'), 'форма підбору і цифри');
+const pd = pickerData(idx, 'uk');
+assert.deepStrictEqual(pd.types, [['1185', 'Пральної машини']]);
+assert.deepStrictEqual(pd.brands['1185'], [['lg', 'LG']]);
+assert.deepStrictEqual(pickerData(idx, 'uk', '1185', 'lg'), [['F1020TD5', 'lg-f1020td5'], ['F12B8', 'lg-f12b8']]);
 assert.ok(hub.html.includes('/modeli/lg/'), 'хаб веде на сторінку бренду');
 const lg = brandsOf(idx).get('lg');
 const bp = renderBrand(idx, lg, 'uk');
@@ -83,7 +89,7 @@ assert.strictEqual(bp.h1, 'Запчастини для техніки LG за м
 assert.ok(bp.html.includes('/modeli/lg-f12b8/') && bp.html.includes('пральної машини LG'), 'моделі згруповані за типом');
 assert.strictEqual(bp.canonical, 'https://lartek.com.ua/modeli/lg/');
 assert.ok(uk.breadcrumbs_desktop.includes('/modeli/lg/'), 'у крихтах моделі є бренд');
-assert.ok(hub.html.includes('/modeli/lg-f1020td5/'));
+assert.ok(!hub.html.includes('/modeli/lg-f1020td5/'), 'на хабі моделей немає — лише бренди й форма');
 
 const sm = renderSitemap(idx);
 assert.strictEqual((sm.match(/<url>/g) || []).length, 8, 'хаб + бренд + 2 моделі, кожна в UA і RU');
