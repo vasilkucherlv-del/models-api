@@ -15,9 +15,10 @@
 const SITE = 'https://lartek.com.ua';
 const RU_FEED = process.env.RU_FEED_URL ||
   'https://lartek.com.ua/content/export/4afcdcba6dc44bbcf68db6be51f8d018.xml';
-const LIMIT = parseInt(process.env.MODEL_PAGES_LIMIT || '1000', 10);
+const LIMIT = parseInt(process.env.MODEL_PAGES_LIMIT || '5000', 10);
 const MIN_PRODUCTS = parseInt(process.env.MODEL_PAGES_MIN || '3', 10);
-const PER_BRAND = parseInt(process.env.MODEL_PAGES_PER_BRAND || '150', 10);
+// Частка одного бренду — не більше 15% сторінок (різноманіття, а не 80% LG/Zelmer).
+const PER_BRAND = parseInt(process.env.MODEL_PAGES_PER_BRAND || String(Math.round(LIMIT * 0.15)), 10);
 const TTL_MS = 6 * 60 * 60 * 1000;
 
 // Тип техніки за категорією-«запчастини для …» (родовий відмінок, однина).
@@ -172,7 +173,7 @@ function buildIndex(rows, products, limit = LIMIT, min = MIN_PRODUCTS) {
     top.push(m);
     if (top.length >= limit) break;
   }
-  return { list: top, bySlug: new Map(top.map((m) => [m.slug, m])) };
+  return { list: top, bySlug: new Map(top.map((m) => [m.slug, m])), candidates: list.length };
 }
 
 function modelName(m) { return m.brand + ' ' + m.model; }
@@ -371,7 +372,7 @@ async function load(pool) {
   if (state.loading) return state.idx ? state : state.loading;
   state.loading = (async () => {
     try {
-      const [xml, db] = await Promise.all([fetchFeed(), pool.query(MODELS_SQL, [MIN_PRODUCTS, LIMIT * 40])]);
+      const [xml, db] = await Promise.all([fetchFeed(), pool.query(MODELS_SQL, [MIN_PRODUCTS, LIMIT * 10])]);
       const products = parseFeed(xml);
       const idx = buildIndex(db.rows, products);
       state = { at: Date.now(), idx, products, loading: null };
@@ -413,7 +414,10 @@ function register(app, pool) {
   app.get('/model-pages/stats', async (req, res) => {
     try {
       const s = await load(pool);
-      res.json({ pages: s.idx.list.length, products: s.products.size, builtAt: new Date(s.at).toISOString(),
+      const brands = {};
+      for (const m of s.idx.list) brands[m.brand] = (brands[m.brand] || 0) + 1;
+      res.json({ pages: s.idx.list.length, candidates: s.idx.candidates, minProducts: MIN_PRODUCTS, perBrand: PER_BRAND,
+        brands, products: s.products.size, builtAt: new Date(s.at).toISOString(),
         top: s.idx.list.slice(0, 20).map((m) => ({ slug: m.slug, n: m.skus.length, type: typeGen(m, 'uk') })) });
     } catch (e) {
       res.status(503).json({ error: e.message });
