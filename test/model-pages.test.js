@@ -27,10 +27,11 @@ const xml = `<yml_catalog><shop><categories>
 ${offer('0101', 1190, 'true', 350, 'Амортизатор для стиральной машины LG', 'Амортизатор для пральної машини LG', 'amort-lg')}
 ${offer('0102', 1191, '', 210, 'Ремень для стиральной машины LG', 'Ремінь для пральної машини LG', 'remen-lg')}
 ${offer('0103', 1191, 'true', 180, 'Ремень 2 LG', 'Ремінь 2 LG', 'remen2-lg')}
+${offer('0104', 1191, 'true', 190, 'Ремень 3 LG', 'Ремінь 3 LG', 'remen3-lg')}
 </offers></shop></yml_catalog>`;
 
 const products = parseFeed(xml);
-assert.strictEqual(products.size, 3);
+assert.strictEqual(products.size, 4);
 const p = products.get('0101');
 assert.strictEqual(p.name_ru, 'Амортизатор для стиральной машины LG');
 assert.strictEqual(p.name_uk, 'Амортизатор для пральної машини LG');
@@ -43,13 +44,14 @@ assert.strictEqual(p.kind_uk, 'Амортизатори');
 
 const rows = [
   { brand: 'LG', model: 'F1020TD5', model_norm: 'F1020TD5', skus: ['0101', '0102', '0103', '9999'] },
-  { brand: 'LG', model: 'F12B8', model_norm: 'F12B8', skus: ['0101', '0102', '0103'] },
+  { brand: 'LG', model: 'F12B8', model_norm: 'F12B8', skus: ['0101', '0102', '0103', '0104'] },
+  { brand: 'LG', model: 'F1020TD5.ALSPBWT', model_norm: 'F1020TD5ALSPBWT', skus: ['0103', '0102', '0101'] }, // той самий набір — дубль
   { brand: 'LG', model: 'WD', model_norm: 'WD', skus: ['0101', '0102', '0103'] },            // без цифр — відкидаємо
   { brand: 'LG', model: 'F00', model_norm: 'F00', skus: ['0101', '9998'] },                  // < 3 товарів із фіду
 ];
 const idx = buildIndex(rows, products, 1000, 3);
-assert.deepStrictEqual(idx.list.map((m) => m.slug), ['lg-f1020td5', 'lg-f12b8']);
-assert.strictEqual(idx.list[0].skus.length, 3, 'товари, яких немає у фіді, не показуємо');
+assert.deepStrictEqual(idx.list.map((m) => m.slug), ['lg-f12b8', 'lg-f1020td5'], 'дубль із тим самим набором товарів відкинуто');
+assert.strictEqual(idx.list[1].skus.length, 3, 'товари, яких немає у фіді, не показуємо');
 assert.strictEqual(makeSlug('De Longhi', 'EC685'), 'de-longhi-ec685');
 
 const uk = renderModel(idx, products, 'lg-f1020td5', 'uk');
