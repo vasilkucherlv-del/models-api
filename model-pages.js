@@ -79,7 +79,7 @@ const T = {
     other: (b) => 'Інші моделі ' + b,
     all: 'Усі моделі техніки',
     allBrand: (b) => 'Усі моделі ' + b,
-    brandsH: 'Бренди', pick: 'Підібрати за моделлю', pType: 'Тип техніки', pBrand: 'Бренд', pModel: 'Модель', pBtn: 'Показати запчастини', pAny: 'Оберіть…', pNo: 'Для цієї моделі ще немає сторінки — скористайтеся пошуком на сайті або напишіть менеджеру.',
+    brandsH: 'Бренди', pick: 'Підібрати за моделлю', pType: 'Тип техніки', pBrand: 'Бренд', pModel: 'Модель', pBtn: 'Показати запчастини', pAny: 'Оберіть…', pNo: 'Такої моделі не знайдено. Перевірте номер на шильдику або напишіть менеджеру — підберемо вручну.',
     stModels: 'моделей техніки', stBrands: 'брендів', stProducts: 'товарів із перевіреною сумісністю',
     plate: 'Де знайти номер моделі', plateText: 'На шильдику приладу: у пральної машини — за люком або на задній стінці, у холодильника — всередині камери, у пилососа й кухонної техніки — на дні корпусу. Вводьте модель так, як на шильдику — підказки з’являться під час набору.',
     brandH: (b) => 'Запчастини для техніки ' + b + ' за моделлю',
@@ -104,7 +104,7 @@ const T = {
     other: (b) => 'Другие модели ' + b,
     all: 'Все модели техники',
     allBrand: (b) => 'Все модели ' + b,
-    brandsH: 'Бренды', pick: 'Подобрать по модели', pType: 'Тип техники', pBrand: 'Бренд', pModel: 'Модель', pBtn: 'Показать запчасти', pAny: 'Выберите…', pNo: 'Для этой модели ещё нет страницы — воспользуйтесь поиском на сайте или напишите менеджеру.',
+    brandsH: 'Бренды', pick: 'Подобрать по модели', pType: 'Тип техники', pBrand: 'Бренд', pModel: 'Модель', pBtn: 'Показать запчасти', pAny: 'Выберите…', pNo: 'Такая модель не найдена. Проверьте номер на шильдике или напишите менеджеру — подберём вручную.',
     stModels: 'моделей техники', stBrands: 'брендов', stProducts: 'товаров с проверенной совместимостью',
     plate: 'Где найти номер модели', plateText: 'На шильдике прибора: у стиральной машины — за люком или на задней стенке, у холодильника — внутри камеры, у пылесоса и кухонной техники — на дне корпуса. Вводите модель так, как на шильдике — подсказки появятся при наборе.',
     brandH: (b) => 'Запчасти для техники ' + b + ' по модели',
@@ -175,6 +175,13 @@ function buildIndex(rows, products, limit = LIMIT, min = MIN_PRODUCTS, minBrand 
   const list = [];
   const seen = new Set();
   const seenSet = new Map();
+  // Канонічне написання бренду: найчастіше серед рядків (BOSCH/Bosch → Bosch); відомі назви моделей у полі «бренд» → справжній бренд.
+  const BRAND_FIX = { 'TWIN TT AQUAFILTER': 'Thomas', 'TWIN XT': 'Thomas', 'TWIN HELPER': 'Thomas', 'TWIN TIGER': 'Thomas', 'PARKETT MASTER XT': 'Thomas', 'SMARTY AQUAFILTER': 'Thomas', 'MOKKO XT': 'Thomas', 'SKY XT': 'Thomas', 'PHILIPS-SAECO': 'Philips' };
+  const casing = {};
+  for (const r of rows) { const b = BRAND_FIX[String(r.brand).toUpperCase()] || r.brand; const k = String(b).toUpperCase(); (casing[k] = casing[k] || {})[b] = (casing[k][b] || 0) + 1; }
+  const canon = {};
+  for (const k in casing) canon[k] = Object.keys(casing[k]).sort((a, b) => casing[k][b] - casing[k][a] || (/^[A-Z]+$/.test(a) ? 1 : -1))[0];
+  rows = rows.map((r) => ({ ...r, brand: canon[(BRAND_FIX[String(r.brand).toUpperCase()] || r.brand).toUpperCase()] || r.brand }));
   for (const r of rows) {
     if (!/\d/.test(r.model_norm) || r.model_norm.length < 3 || !r.brand) continue;
     const skus = [...new Set(r.skus)].filter((s) => products.has(s));
@@ -291,10 +298,11 @@ function alternates(slug) {
   return { uk: SITE + pathFor('uk', slug), ru: SITE + pathFor('ru', slug) };
 }
 
-function renderModel(idx, products, slug, lang) {
+function renderModel(idx, products, slug, lang, extra) {
   const t = T[lang];
-  const m = idx.bySlug.get(slug);
+  const m = idx.bySlug.get(slug) || extra;
   if (!m) return renderNotFound(lang, slug);
+  const thin = !idx.bySlug.has(slug);   // модель поза індексом (1–2 товари): сторінка є, але не для Google
   const name = modelName(m);
   const tg = typeGen(m, lang);
   const full = (tg ? tg + ' ' : '') + name;
@@ -330,7 +338,7 @@ function renderModel(idx, products, slug, lang) {
     status: 200,
     title: h1 + t.titleTail,
     description: t.desc(full, items.length, minPrice, kinds),
-    h1, html, robots: 'index, follow',
+    h1, html, robots: thin ? 'noindex, follow' : 'index, follow',
     canonical: SITE + self, alternates: alternates(slug),
     ...crumbsOut(crumbs(lang, [{ name: t.home }, { name: t.hub, url: pathFor(lang) }, { name: m.brand, url: pathFor(lang, slugPart(m.brand)) }, { name: name, self }])),
     jsonld: ld,
@@ -370,7 +378,7 @@ function renderHub(idx, products, lang) {
     `function norm(x){return String(x).toUpperCase().replace(/[^A-Z0-9]/g,'');}` +
     `function find(){var v=norm(M.value);if(!v)return null;var ex=models.filter(function(x){return norm(x[0])===v});if(ex.length)return ex[0];var st=models.filter(function(x){return norm(x[0]).indexOf(v)===0});return st.length===1?st[0]:null;}` +
     `M.oninput=function(){MS.textContent='';G.disabled=!M.value.trim();clearTimeout(tm);tm=setTimeout(load,200);};` +
-    `function go(){var q=M.value.trim();if(!q)return;var f=find();if(f&&f[1]){location.href=P+f[1]+'/';}else{location.href=(L==='ru'?'/ru':'')+'/katalog/search/?q='+encodeURIComponent((B.options[B.selectedIndex]||{}).text.replace(/\s*\(\d+\)$/,'')+' '+q);}}` +
+    `function go(){var q=M.value.trim();if(!q)return;var f=find();if(f){location.href=P+f[1]+'/';}else{MS.textContent=${JSON.stringify(t.pNo)};}}` +
     `G.onclick=go;M.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();go();}};})();</script>`;
   const html = STYLE + picker +
     `<ul class="lmp-stats"><li><b>${fmt(idx.list.length)}</b><span>${t.stModels}</span></li><li><b>${brands.length}</b><span>${t.stBrands}</span></li><li><b>${fmt(nProducts)}</b><span>${t.stProducts}</span></li></ul>` +
@@ -390,6 +398,26 @@ function renderHub(idx, products, lang) {
 }
 
 // Дані для форми підбору: типи й бренди (без параметрів) або моделі (type + brand).
+// Модель поза індексом: шукаємо в БД за slug (<бренд>-<model_norm>) — сторінка з noindex.
+async function dynamicModel(pool, idx, products, slug) {
+  const brands = [...brandsOf(idx).values()].filter((b) => slug.startsWith(b.slug + '-')).sort((a, b) => b.slug.length - a.slug.length);
+  for (const b of brands) {
+    const norm = slug.slice(b.slug.length + 1).toUpperCase();
+    if (!norm) continue;
+    const r = await pool.query(`SELECT mode() WITHIN GROUP (ORDER BY model) AS model, array_agg(DISTINCT sku) AS skus
+      FROM compatibility WHERE upper(brand) = $1 AND model_norm = $2`, [b.brand.toUpperCase(), norm]);
+    const row = r.rows[0];
+    if (!row || !row.model) continue;
+    const skus = row.skus.filter((x) => products.has(x));
+    if (!skus.length) continue;
+    const cnt = {};
+    for (const x of skus) { const tp = products.get(x).type; if (tp) cnt[tp] = (cnt[tp] || 0) + 1; }
+    const type = Object.keys(cnt).sort((a, c) => cnt[c] - cnt[a])[0] || null;
+    return { slug, brand: b.brand, model: row.model, skus, type: type ? Number(type) : null };
+  }
+  return null;
+}
+
 async function pickerModels(pool, idx, brand, q) {
   const bname = ([...brandsOf(idx).values()].find((b) => b.slug === brand) || {}).brand;
   if (!bname) return [];
@@ -399,7 +427,7 @@ async function pickerModels(pool, idx, brand, q) {
       GROUP BY model, model_norm ORDER BY count(*) DESC, model LIMIT 60`, [bname.toUpperCase(), qn + '%']);
   const seen = new Set();
   return r.rows.filter((x) => !seen.has(x.model_norm) && seen.add(x.model_norm))
-    .map((x) => { const slug = makeSlug(bname, x.model_norm); return [x.model, idx.bySlug.has(slug) ? slug : null]; });
+    .map((x) => [x.model, makeSlug(bname, x.model_norm)]);
 }
 
 function pickerData(idx, lang) {
@@ -518,7 +546,8 @@ function register(app, pool) {
       const s = await load(pool);
       const slug = String(req.query.slug || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
       const br = slug && brandsOf(s.idx).get(slug);
-      const out = !slug ? renderHub(s.idx, s.products, lang(req)) : br ? renderBrand(s.idx, br, lang(req)) : renderModel(s.idx, s.products, slug, lang(req));
+      const extra = slug && !br && !s.idx.bySlug.has(slug) ? await dynamicModel(pool, s.idx, s.products, slug) : null;
+      const out = !slug ? renderHub(s.idx, s.products, lang(req)) : br ? renderBrand(s.idx, br, lang(req)) : renderModel(s.idx, s.products, slug, lang(req), extra);
       res.set('Cache-Control', 'public, max-age=1800');
       res.json(out);
     } catch (e) {
@@ -562,4 +591,4 @@ function register(app, pool) {
   });
 }
 
-module.exports = { register, parseFeed, buildIndex, renderModel, renderHub, renderBrand, brandsOf, pickerData, pickerModels, renderSitemap, makeSlug, plural };
+module.exports = { register, parseFeed, buildIndex, renderModel, renderHub, renderBrand, brandsOf, pickerData, pickerModels, dynamicModel, renderSitemap, makeSlug, plural };

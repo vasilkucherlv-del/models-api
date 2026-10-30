@@ -49,10 +49,12 @@ const rows = [
   { brand: 'LG', model: 'F1020TD5.ALSPBWT', model_norm: 'F1020TD5ALSPBWT', skus: ['0103', '0102', '0101'] }, // той самий набір — дубль
   { brand: 'LG', model: 'WD', model_norm: 'WD', skus: ['0101', '0102', '0103'] },            // без цифр — відкидаємо
   { brand: 'LG', model: 'F00', model_norm: 'F00', skus: ['0101', '9998'] },                  // < 3 товарів із фіду
-  { brand: 'TWIN XT', model: 'X1', model_norm: 'X1', skus: ['0101', '0102', '0104'] },          // «бренд» з однією моделлю — сміття
+  { brand: 'TWIN XT', model: 'X1', model_norm: 'X1', skus: ['0101', '0102', '0104'] },          // назва моделі Thomas у полі «бренд» → Thomas (1 модель — відсіється)
+  { brand: 'lg', model: 'F14B8', model_norm: 'F14B8', skus: ['0102', '0103', '0104'] },         // інше написання → LG
 ];
 const idx = buildIndex(rows, products, 1000, 3, 2);
-assert.deepStrictEqual(idx.list.map((m) => m.slug), ['lg-f12b8', 'lg-f1020td5'], 'дубль відкинуто, бренд з 1 моделлю відкинуто');
+assert.deepStrictEqual(idx.list.map((m) => m.slug), ['lg-f12b8', 'lg-f1020td5', 'lg-f14b8'], 'дубль відкинуто, сміттєвий бренд відкинуто, lg → LG');
+assert.ok(idx.list.every((m) => m.brand === 'LG'), 'написання бренду уніфіковано');
 assert.strictEqual(idx.list[1].skus.length, 3, 'товари, яких немає у фіді, не показуємо');
 assert.strictEqual(makeSlug('De Longhi', 'EC685'), 'de-longhi-ec685');
 
@@ -85,7 +87,15 @@ assert.deepStrictEqual(pd.types, [['1185', 'Пральна машина']]);
 assert.deepStrictEqual(pd.brands['1185'], [['lg', 'LG']]);
 const { pickerModels } = require('../model-pages');
 const fakePool = { query: async (sql, p) => { assert.strictEqual(p[0], 'LG'); assert.strictEqual(p[1], 'F10%'); return { rows: [{ model: 'F1020TD5', model_norm: 'F1020TD5' }, { model: 'F10B8ND', model_norm: 'F10B8ND' }] }; } };
-assert.deepStrictEqual(await pickerModels(fakePool, idx, 'lg', 'f10'), [['F1020TD5', 'lg-f1020td5'], ['F10B8ND', null]], 'модель без сторінки повертається з null → піде в пошук сайту');
+assert.deepStrictEqual(await pickerModels(fakePool, idx, 'lg', 'f10'), [['F1020TD5', 'lg-f1020td5'], ['F10B8ND', 'lg-f10b8nd']], 'кожна модель має адресу сторінки');
+const { dynamicModel } = require('../model-pages');
+const pool2 = { query: async (sql, p) => { assert.deepStrictEqual(p, ['LG', 'F10B8ND']); return { rows: [{ model: 'F10B8ND', skus: ['0101', '9999'] }] }; } };
+const dyn = await dynamicModel(pool2, idx, products, 'lg-f10b8nd');
+assert.deepStrictEqual(dyn, { slug: 'lg-f10b8nd', brand: 'LG', model: 'F10B8ND', skus: ['0101'], type: 1185 });
+const thin = renderModel(idx, products, 'lg-f10b8nd', 'uk', dyn);
+assert.strictEqual(thin.status, 200);
+assert.strictEqual(thin.robots, 'noindex, follow', 'модель з 1 товаром — сторінка є, але noindex');
+assert.ok(thin.html.includes('/amort-lg/'));
 assert.ok(hub.html.includes('/modeli/lg/'), 'хаб веде на сторінку бренду');
 const lg = brandsOf(idx).get('lg');
 const bp = renderBrand(idx, lg, 'uk');
@@ -96,7 +106,7 @@ assert.ok(uk.breadcrumbs_desktop.includes('/modeli/lg/'), 'у крихтах м�
 assert.ok(!hub.html.includes('/modeli/lg-f1020td5/'), 'на хабі моделей немає — лише бренди й форма');
 
 const sm = renderSitemap(idx);
-assert.strictEqual((sm.match(/<url>/g) || []).length, 8, 'хаб + бренд + 2 моделі, кожна в UA і RU');
+assert.strictEqual((sm.match(/<url>/g) || []).length, 10, 'хаб + бренд + 3 моделі, кожна в UA і RU');
 assert.ok(sm.includes('/modeli/lg/'), 'сторінка бренду в карті сайту');
 
 // HTML-ін'єкції з назв не проходять
