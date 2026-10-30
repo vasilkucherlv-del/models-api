@@ -15,10 +15,11 @@
 const SITE = 'https://lartek.com.ua';
 const RU_FEED = process.env.RU_FEED_URL ||
   'https://lartek.com.ua/content/export/4afcdcba6dc44bbcf68db6be51f8d018.xml';
-const LIMIT = parseInt(process.env.MODEL_PAGES_LIMIT || '5000', 10);
+// Сторінки — для всіх моделей, до яких підходить MIN_PRODUCTS+ товарів (ліміт лише як запобіжник).
+const LIMIT = parseInt(process.env.MODEL_PAGES_LIMIT || '50000', 10);
 const MIN_PRODUCTS = parseInt(process.env.MODEL_PAGES_MIN || '3', 10);
-// Частка одного бренду — не більше 15% сторінок (різноманіття, а не 80% LG/Zelmer).
-const PER_BRAND = parseInt(process.env.MODEL_PAGES_PER_BRAND || String(Math.round(LIMIT * 0.15)), 10);
+const PER_BRAND = parseInt(process.env.MODEL_PAGES_PER_BRAND || String(LIMIT), 10);
+// Бренд потрапляє в розділ лише з MIN_BRAND+ моделями (відсіює назви моделей у полі «бренд»).
 const MIN_BRAND = parseInt(process.env.MODEL_PAGES_MIN_BRAND || '3', 10);
 const TTL_MS = 6 * 60 * 60 * 1000;
 
@@ -363,10 +364,13 @@ function renderHub(idx, products, lang) {
     `function opt(sel,list,ph){sel.innerHTML='<option value=\"\">'+ph+'</option>'+list.map(function(x){return '<option value=\"'+x[0]+'\">'+x[1]+'</option>'}).join('');}` +
     `fetch(A+'/model-pages/picker?lang='+L).then(function(r){return r.json()}).then(function(d){D=d;opt(T,d.types,${JSON.stringify(t.pAny)});});` +
     `T.onchange=function(){B.disabled=!T.value;M.disabled=true;M.value='';G.disabled=true;if(T.value){opt(B,D.brands[T.value]||[],${JSON.stringify(t.pAny)});}};` +
-    `B.onchange=function(){M.value='';G.disabled=true;if(!B.value){M.disabled=true;return;}fetch(A+'/model-pages/picker?lang='+L+'&type='+T.value+'&brand='+B.value).then(function(r){return r.json()}).then(function(l){models=l;DL.innerHTML=l.map(function(x){return '<option value=\"'+x[0].replace(/"/g,'&quot;')+'\">'}).join('');M.disabled=false;M.focus();});};` +
-    `function find(){var v=M.value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');if(!v)return null;var ex=models.filter(function(x){return x[0].toUpperCase().replace(/[^A-Z0-9]/g,'')===v});if(ex.length)return ex[0];var st=models.filter(function(x){return x[0].toUpperCase().replace(/[^A-Z0-9]/g,'').indexOf(v)===0});return st.length===1?st[0]:null;}` +
-    `M.oninput=function(){G.disabled=!find();MS.textContent='';};` +
-    `function go(){var f=find();if(f){location.href=P+f[1]+'/';}else if(M.value.trim()){MS.textContent=${JSON.stringify(t.pNo)};}}` +
+    `B.onchange=function(){M.value='';G.disabled=true;models=[];DL.innerHTML='';M.disabled=!B.value;if(B.value)M.focus();};` +
+    `var tm=null,last='';function load(){var q=M.value.trim();if(q.length<2||!B.value)return;var key=B.value+'|'+q.toUpperCase().replace(/[^A-Z0-9]/g,'');if(key===last)return;last=key;` +
+    `fetch(A+'/model-pages/picker?lang='+L+'&brand='+B.value+'&q='+encodeURIComponent(q)).then(function(r){return r.json()}).then(function(l){models=l;DL.innerHTML=l.map(function(x){return '<option value=\"'+x[0].replace(/"/g,'&quot;')+'\">'}).join('');G.disabled=!M.value.trim();});}` +
+    `function norm(x){return String(x).toUpperCase().replace(/[^A-Z0-9]/g,'');}` +
+    `function find(){var v=norm(M.value);if(!v)return null;var ex=models.filter(function(x){return norm(x[0])===v});if(ex.length)return ex[0];var st=models.filter(function(x){return norm(x[0]).indexOf(v)===0});return st.length===1?st[0]:null;}` +
+    `M.oninput=function(){MS.textContent='';G.disabled=!M.value.trim();clearTimeout(tm);tm=setTimeout(load,200);};` +
+    `function go(){var q=M.value.trim();if(!q)return;var f=find();if(f&&f[1]){location.href=P+f[1]+'/';}else{location.href=(L==='ru'?'/ru':'')+'/katalog/search/?q='+encodeURIComponent((B.options[B.selectedIndex]||{}).text.replace(/\s*\(\d+\)$/,'')+' '+q);}}` +
     `G.onclick=go;M.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();go();}};})();</script>`;
   const html = STYLE + picker +
     `<ul class="lmp-stats"><li><b>${fmt(idx.list.length)}</b><span>${t.stModels}</span></li><li><b>${brands.length}</b><span>${t.stBrands}</span></li><li><b>${fmt(nProducts)}</b><span>${t.stProducts}</span></li></ul>` +
@@ -386,12 +390,20 @@ function renderHub(idx, products, lang) {
 }
 
 // Дані для форми підбору: типи й бренди (без параметрів) або моделі (type + brand).
-function pickerData(idx, lang, type, brand) {
+async function pickerModels(pool, idx, brand, q) {
+  const bname = ([...brandsOf(idx).values()].find((b) => b.slug === brand) || {}).brand;
+  if (!bname) return [];
+  const qn = String(q || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const r = await pool.query(
+    `SELECT model, model_norm FROM compatibility WHERE upper(brand) = $1 AND model_norm LIKE $2
+      GROUP BY model, model_norm ORDER BY count(*) DESC, model LIMIT 60`, [bname.toUpperCase(), qn + '%']);
+  const seen = new Set();
+  return r.rows.filter((x) => !seen.has(x.model_norm) && seen.add(x.model_norm))
+    .map((x) => { const slug = makeSlug(bname, x.model_norm); return [x.model, idx.bySlug.has(slug) ? slug : null]; });
+}
+
+function pickerData(idx, lang) {
   const li = lang === 'ru' ? 1 : 0;
-  if (type && brand) {
-    return idx.list.filter((m) => String(m.type) === String(type) && slugPart(m.brand) === brand)
-      .map((m) => [m.model, m.slug]).sort((a, b) => a[0].localeCompare(b[0]));
-  }
   const types = {}, brands = {};
   for (const m of idx.list) {
     if (!m.type) continue;
@@ -485,7 +497,7 @@ async function load(pool) {
   if (state.loading) return state.idx ? state : state.loading;
   state.loading = (async () => {
     try {
-      const [xml, db] = await Promise.all([fetchFeed(), pool.query(MODELS_SQL, [MIN_PRODUCTS, LIMIT * 10])]);
+      const [xml, db] = await Promise.all([fetchFeed(), pool.query(MODELS_SQL, [MIN_PRODUCTS, LIMIT * 4])]);
       const products = parseFeed(xml);
       const idx = buildIndex(db.rows, products);
       state = { at: Date.now(), idx, products, loading: null };
@@ -518,7 +530,9 @@ function register(app, pool) {
     try {
       const s = await load(pool);
       res.set('Cache-Control', 'public, max-age=1800');
-      res.json(pickerData(s.idx, lang(req), String(req.query.type || '').replace(/\D/g, ''), String(req.query.brand || '').toLowerCase().replace(/[^a-z0-9-]/g, '')));
+      const brand = String(req.query.brand || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
+      if (brand && req.query.q !== undefined) return res.json(await pickerModels(pool, s.idx, brand, req.query.q));
+      res.json(pickerData(s.idx, lang(req)));
     } catch (e) {
       res.status(503).json({ error: 'unavailable' });
     }
@@ -548,4 +562,4 @@ function register(app, pool) {
   });
 }
 
-module.exports = { register, parseFeed, buildIndex, renderModel, renderHub, renderBrand, brandsOf, pickerData, renderSitemap, makeSlug, plural };
+module.exports = { register, parseFeed, buildIndex, renderModel, renderHub, renderBrand, brandsOf, pickerData, pickerModels, renderSitemap, makeSlug, plural };
