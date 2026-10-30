@@ -51,7 +51,7 @@ export default {
     if (!pr.ok || !tr.ok) return new Response('Сторінка тимчасово недоступна', { status: 503, headers: { 'Retry-After': '120' } });
     const p = await pr.json();
 
-    const tplPaths = ['/' + TPL + '/', '/ru/' + TPL + '/'];
+    const tplRe = new RegExp('^/(ru/)?' + TPL + '/\\.?(\\?.*)?$');
     const self = ORIGIN + clean;
     const alt = p.alternates || {};
     const setAttr = (attr, val) => ({ element(e) { e.setAttribute(attr, val); } });
@@ -77,10 +77,9 @@ export default {
       .on('.catalog__banners', { element(e) { e.remove(); } })
       // посилання на сторінку-шаблон (перемикач мови тощо) → на цю ж модель
       .on('a[href]', { element(e) {
-        const href = (e.getAttribute('href') || '').replace(ORIGIN, '');
-        for (const tp of tplPaths) {
-          if (href === tp || href.startsWith(tp + '?')) e.setAttribute('href', (tp.startsWith('/ru/') ? alt.ru : alt.uk) + href.slice(tp.length));
-        }
+        // Horoshop пише посилання як «/TPL/» або «/TPL/.?v=pc» (перемикач версії)
+        const mm = (e.getAttribute('href') || '').replace(ORIGIN, '').match(tplRe);
+        if (mm) e.setAttribute('href', (mm[1] ? alt.ru : alt.uk) + (mm[2] || ''));
       } });
 
     const headers = new Headers(tr.headers);
