@@ -79,7 +79,7 @@ const hub = renderHub(idx, products, 'uk');
 const { pickerData } = require('../model-pages');
 assert.ok(hub.html.includes('id="lmp-t"') && hub.html.includes('lmp-stats'), 'форма підбору і цифри');
 const pd = pickerData(idx, 'uk');
-assert.deepStrictEqual(pd.types, [['1185', 'Пральної машини']]);
+assert.deepStrictEqual(pd.types, [['1185', 'Пральна машина']]);
 assert.deepStrictEqual(pd.brands['1185'], [['lg', 'LG']]);
 assert.deepStrictEqual(pickerData(idx, 'uk', '1185', 'lg'), [['F1020TD5', 'lg-f1020td5'], ['F12B8', 'lg-f12b8']]);
 assert.ok(hub.html.includes('/modeli/lg/'), 'хаб веде на сторінку бренду');
