@@ -163,18 +163,32 @@ function modelName(m) { return m.brand + ' ' + m.model; }
 function typeGen(m, lang) { return m.type && TYPES[m.type] ? TYPES[m.type][lang === 'ru' ? 1 : 0] : ''; }
 
 function crumbs(lang, items) {
-  // Та сама розмітка, що в Horoshop (класи breadcrumbs__*), тож вигляд не відрізняється.
-  const arrow = '<svg class="icon icon--arrow-right"><use xlink:href="#icon-arrow-right"></use></svg>';
-  return items.map((it, i) => {
-    const pos = `<meta itemprop="position" content="${i + 1}">`;
+  // Розмітка як у Horoshop. Шаблони різні: мобільний — breadcrumbs__*, десктоп — breadcrumbs-i.
+  const home = SITE + (lang === 'ru' ? '/ru/' : '/');
+  const pos = (i) => `<meta itemprop="position" content="${i + 1}">`;
+  const li = 'itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem"';
+  const mArrow = '<svg class="icon icon--arrow-right"><use xlink:href="#icon-arrow-right"></use></svg>';
+  const mobile = '<div class="breadcrumbs__list-wrap"><div class="breadcrumbs__list">' + items.map((it, i) => {
     const inner = i === 0
-      ? `<a class="breadcrumbs__link" itemprop="item" href="${SITE}${lang === 'ru' ? '/ru/' : '/'}" aria-label="${esc(it.name)}"><meta itemprop="name" content="${esc(it.name)}"><svg class="icon icon--homepage"><use xlink:href="#icon-homepage"></use></svg></a>`
+      ? `<a class="breadcrumbs__link" itemprop="item" href="${home}" aria-label="${esc(it.name)}"><meta itemprop="name" content="${esc(it.name)}"><svg class="icon icon--homepage"><use xlink:href="#icon-homepage"></use></svg></a>`
       : it.url
         ? `<a class="breadcrumbs__link" itemprop="item" href="${SITE}${it.url}"><span itemprop="name">${esc(it.name)}</span></a>`
         : `<span class="breadcrumbs__link" itemprop="item" content="${SITE}${it.self}"><span itemprop="name">${esc(it.name)}</span></span>`;
-    return (i ? arrow : '') + `<div class="breadcrumbs__item" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">${inner}${pos}</div>`;
+    return (i ? mArrow : '') + `<div class="breadcrumbs__item" ${li}>${inner}${pos(i)}</div>`;
+  }).join('') + '</div></div>';
+  const dArrow = '<svg class="icon icon--breadcrumbs-arrow"><use xlink:href="#icon-breadcrumbs-arrow"></use></svg>';
+  const desktop = items.map((it, i) => {
+    const last = i === items.length - 1;
+    const href = i === 0 ? home : it.url ? SITE + it.url : '';
+    const inner = href && !last
+      ? `<a itemprop="item" href="${href}"><span itemprop="name">${esc(it.name)}</span></a>`
+      : `<span itemprop="item" content="${SITE}${it.self || it.url || '/'}"><span itemprop="name">${esc(it.name)}</span></span>`;
+    return `<div class="breadcrumbs-i" ${li}>${inner}${pos(i)}${last ? '' : dArrow}</div>`;
   }).join('');
+  return { mobile, desktop };
 }
+
+const crumbsOut = (c) => ({ breadcrumbs: c.mobile, breadcrumbs_desktop: c.desktop });
 
 const STYLE = '<style>' +
   '.lmp-intro{margin:0 0 20px;line-height:1.55}' +
@@ -255,7 +269,7 @@ function renderModel(idx, products, slug, lang) {
     description: t.desc(full, items.length, minPrice, kinds),
     h1, html, robots: 'index, follow',
     canonical: SITE + self, alternates: alternates(slug),
-    breadcrumbs: crumbs(lang, [{ name: t.home }, { name: t.hub, url: pathFor(lang) }, { name: name, self }]),
+    ...crumbsOut(crumbs(lang, [{ name: t.home }, { name: t.hub, url: pathFor(lang) }, { name: name, self }])),
     jsonld: ld,
   };
 }
@@ -282,7 +296,7 @@ function renderHub(idx, lang) {
     description: t.hubDesc,
     h1: t.hub, html, robots: 'index, follow',
     canonical: SITE + self, alternates: alternates(''),
-    breadcrumbs: crumbs(lang, [{ name: t.home }, { name: t.hub, self }]),
+    ...crumbsOut(crumbs(lang, [{ name: t.home }, { name: t.hub, self }])),
     jsonld: [],
   };
 }
@@ -297,7 +311,7 @@ function renderNotFound(lang, slug) {
     html: `<p>${t.notFoundText}</p><p><a href="${pathFor(lang)}">${t.all} →</a></p>`,
     robots: 'noindex, follow',
     canonical: SITE + pathFor(lang, slug), alternates: alternates(slug),
-    breadcrumbs: crumbs(lang, [{ name: t.home }, { name: t.hub, url: pathFor(lang) }, { name: t.notFound, self: pathFor(lang, slug) }]),
+    ...crumbsOut(crumbs(lang, [{ name: t.home }, { name: t.hub, url: pathFor(lang) }, { name: t.notFound, self: pathFor(lang, slug) }])),
     jsonld: [],
   };
 }

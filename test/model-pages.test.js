@@ -83,4 +83,8 @@ const evil = parseFeed(xml.replace('Амортизатор для прально
 const idx2 = buildIndex(rows, evil, 1000, 3);
 assert.ok(!renderModel(idx2, evil, 'lg-f1020td5', 'uk').html.includes('<script>x'));
 
+assert.ok(uk.breadcrumbs.includes('breadcrumbs__list') && uk.breadcrumbs.includes('/modeli/'), 'мобільні крихти');
+assert.ok(uk.breadcrumbs_desktop.includes('breadcrumbs-i') && !uk.breadcrumbs_desktop.includes('breadcrumbs__'), 'десктопні крихти');
+assert.strictEqual((uk.breadcrumbs_desktop.match(/<svg/g) || []).length, 2, 'стрілки між трьома пунктами');
+
 console.log('model-pages: OK');
