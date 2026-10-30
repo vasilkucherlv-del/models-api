@@ -77,9 +77,9 @@ export default {
       .on('.catalog__banners', { element(e) { e.remove(); } })
       // посилання на сторінку-шаблон (перемикач мови тощо) → на цю ж модель
       .on('a[href]', { element(e) {
-        const href = e.getAttribute('href') || '';
+        const href = (e.getAttribute('href') || '').replace(ORIGIN, '');
         for (const tp of tplPaths) {
-          if (href === tp || href === ORIGIN + tp) e.setAttribute('href', tp.startsWith('/ru/') ? alt.ru : alt.uk);
+          if (href === tp || href.startsWith(tp + '?')) e.setAttribute('href', (tp.startsWith('/ru/') ? alt.ru : alt.uk) + href.slice(tp.length));
         }
       } });
 
