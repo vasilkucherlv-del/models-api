@@ -49,10 +49,12 @@ const rows = [
   { brand: 'LG', model: 'F1020TD5.ALSPBWT', model_norm: 'F1020TD5ALSPBWT', skus: ['0103', '0102', '0101'] }, // той самий набір — дубль
   { brand: 'LG', model: 'WD', model_norm: 'WD', skus: ['0101', '0102', '0103'] },            // без цифр — відкидаємо
   { brand: 'LG', model: 'F00', model_norm: 'F00', skus: ['0101', '9998'] },                  // < 3 товарів із фіду
-  { brand: 'TWIN XT', model: 'X1', model_norm: 'X1', skus: ['0101', '0102', '0104'] },          // «бренд» з однією моделлю — сміття
+  { brand: 'TWIN XT', model: 'X1', model_norm: 'X1', skus: ['0101', '0102', '0104'] },          // назва моделі Thomas у полі «бренд» → Thomas (1 модель — відсіється)
+  { brand: 'lg', model: 'F14B8', model_norm: 'F14B8', skus: ['0102', '0103', '0104'] },         // інше написання → LG
 ];
 const idx = buildIndex(rows, products, 1000, 3, 2);
-assert.deepStrictEqual(idx.list.map((m) => m.slug), ['lg-f12b8', 'lg-f1020td5'], 'дубль відкинуто, бренд з 1 моделлю відкинуто');
+assert.deepStrictEqual(idx.list.map((m) => m.slug), ['lg-f12b8', 'lg-f1020td5', 'lg-f14b8'], 'дубль відкинуто, сміттєвий бренд відкинуто, lg → LG');
+assert.ok(idx.list.every((m) => m.brand === 'LG'), 'написання бренду уніфіковано');
 assert.strictEqual(idx.list[1].skus.length, 3, 'товари, яких немає у фіді, не показуємо');
 assert.strictEqual(makeSlug('De Longhi', 'EC685'), 'de-longhi-ec685');
 
@@ -96,7 +98,7 @@ assert.ok(uk.breadcrumbs_desktop.includes('/modeli/lg/'), 'у крихтах м�
 assert.ok(!hub.html.includes('/modeli/lg-f1020td5/'), 'на хабі моделей немає — лише бренди й форма');
 
 const sm = renderSitemap(idx);
-assert.strictEqual((sm.match(/<url>/g) || []).length, 8, 'хаб + бренд + 2 моделі, кожна в UA і RU');
+assert.strictEqual((sm.match(/<url>/g) || []).length, 10, 'хаб + бренд + 3 моделі, кожна в UA і RU');
 assert.ok(sm.includes('/modeli/lg/'), 'сторінка бренду в карті сайту');
 
 // HTML-ін'єкції з назв не проходять

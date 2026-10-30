@@ -175,6 +175,13 @@ function buildIndex(rows, products, limit = LIMIT, min = MIN_PRODUCTS, minBrand 
   const list = [];
   const seen = new Set();
   const seenSet = new Map();
+  // Канонічне написання бренду: найчастіше серед рядків (BOSCH/Bosch → Bosch); відомі назви моделей у полі «бренд» → справжній бренд.
+  const BRAND_FIX = { 'TWIN TT AQUAFILTER': 'Thomas', 'TWIN XT': 'Thomas', 'TWIN HELPER': 'Thomas', 'TWIN TIGER': 'Thomas', 'PARKETT MASTER XT': 'Thomas', 'SMARTY AQUAFILTER': 'Thomas', 'MOKKO XT': 'Thomas', 'SKY XT': 'Thomas', 'PHILIPS-SAECO': 'Philips' };
+  const casing = {};
+  for (const r of rows) { const b = BRAND_FIX[String(r.brand).toUpperCase()] || r.brand; const k = String(b).toUpperCase(); (casing[k] = casing[k] || {})[b] = (casing[k][b] || 0) + 1; }
+  const canon = {};
+  for (const k in casing) canon[k] = Object.keys(casing[k]).sort((a, b) => casing[k][b] - casing[k][a] || (/^[A-Z]+$/.test(a) ? 1 : -1))[0];
+  rows = rows.map((r) => ({ ...r, brand: canon[(BRAND_FIX[String(r.brand).toUpperCase()] || r.brand).toUpperCase()] || r.brand }));
   for (const r of rows) {
     if (!/\d/.test(r.model_norm) || r.model_norm.length < 3 || !r.brand) continue;
     const skus = [...new Set(r.skus)].filter((s) => products.has(s));
