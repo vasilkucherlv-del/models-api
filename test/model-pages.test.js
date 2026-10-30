@@ -49,9 +49,10 @@ const rows = [
   { brand: 'LG', model: 'F1020TD5.ALSPBWT', model_norm: 'F1020TD5ALSPBWT', skus: ['0103', '0102', '0101'] }, // той самий набір — дубль
   { brand: 'LG', model: 'WD', model_norm: 'WD', skus: ['0101', '0102', '0103'] },            // без цифр — відкидаємо
   { brand: 'LG', model: 'F00', model_norm: 'F00', skus: ['0101', '9998'] },                  // < 3 товарів із фіду
+  { brand: 'TWIN XT', model: 'X1', model_norm: 'X1', skus: ['0101', '0102', '0104'] },          // «бренд» з однією моделлю — сміття
 ];
-const idx = buildIndex(rows, products, 1000, 3);
-assert.deepStrictEqual(idx.list.map((m) => m.slug), ['lg-f12b8', 'lg-f1020td5'], 'дубль із тим самим набором товарів відкинуто');
+const idx = buildIndex(rows, products, 1000, 3, 2);
+assert.deepStrictEqual(idx.list.map((m) => m.slug), ['lg-f12b8', 'lg-f1020td5'], 'дубль відкинуто, бренд з 1 моделлю відкинуто');
 assert.strictEqual(idx.list[1].skus.length, 3, 'товари, яких немає у фіді, не показуємо');
 assert.strictEqual(makeSlug('De Longhi', 'EC685'), 'de-longhi-ec685');
 

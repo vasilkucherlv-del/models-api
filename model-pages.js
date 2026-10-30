@@ -18,8 +18,9 @@ const RU_FEED = process.env.RU_FEED_URL ||
 // Сторінки — для всіх моделей, до яких підходить MIN_PRODUCTS+ товарів (ліміт лише як запобіжник).
 const LIMIT = parseInt(process.env.MODEL_PAGES_LIMIT || '50000', 10);
 const MIN_PRODUCTS = parseInt(process.env.MODEL_PAGES_MIN || '3', 10);
-// Частка одного бренду — не більше 15% сторінок (різноманіття, а не 80% LG/Zelmer).
 const PER_BRAND = parseInt(process.env.MODEL_PAGES_PER_BRAND || String(LIMIT), 10);
+// Бренд потрапляє в розділ лише з MIN_BRAND+ моделями (відсіює назви моделей у полі «бренд»).
+const MIN_BRAND = parseInt(process.env.MODEL_PAGES_MIN_BRAND || '3', 10);
 const TTL_MS = 6 * 60 * 60 * 1000;
 
 // Тип техніки за категорією-«запчастини для …» (родовий відмінок, однина).
@@ -170,7 +171,7 @@ function parseFeed(xml) {
 
 // ── Індекс сторінок із рядків БД ──
 // rows: [{brand, model, model_norm, skus:[...]}] — вже згруповані по (бренд, модель)
-function buildIndex(rows, products, limit = LIMIT, min = MIN_PRODUCTS) {
+function buildIndex(rows, products, limit = LIMIT, min = MIN_PRODUCTS, minBrand = MIN_BRAND) {
   const list = [];
   const seen = new Set();
   const seenSet = new Map();
@@ -194,10 +195,15 @@ function buildIndex(rows, products, limit = LIMIT, min = MIN_PRODUCTS) {
     seenSet.set(key, item);
     list.push(item);
   }
-  list.sort((a, b) => b.skus.length - a.skus.length || a.slug.localeCompare(b.slug));
+  // Бренд має мати щонайменше MIN_BRAND моделей — інакше це сміття в полі «бренд»
+  // (назви моделей Thomas на кшталт TWIN XT, PARKETT MASTER) або бренд з 1–2 моделями без сенсу для окремої сторінки.
+  const brandCount = {};
+  for (const m of list) brandCount[m.brand.toUpperCase()] = (brandCount[m.brand.toUpperCase()] || 0) + 1;
+  const clean = list.filter((m) => brandCount[m.brand.toUpperCase()] >= minBrand);
+  clean.sort((a, b) => b.skus.length - a.skus.length || a.slug.localeCompare(b.slug));
   // Не більше PER_BRAND сторінок на бренд — інакше топ забивають варіанти двох-трьох брендів.
   const perBrand = {}, top = [];
-  for (const m of list) {
+  for (const m of clean) {
     const b = m.brand.toUpperCase();
     if ((perBrand[b] = (perBrand[b] || 0) + 1) > PER_BRAND) continue;
     top.push(m);
