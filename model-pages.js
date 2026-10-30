@@ -217,6 +217,8 @@ const STYLE = '<style>' +
   '.lmp-a{font-size:13px;color:#2e7d32}.lmp-a.no{color:#999}' +
   '.lmp-h{font-size:20px;margin:24px 0 12px}' +
   '.lmp-links{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 20px;padding:0;list-style:none}' +
+  '.lmp-grid>li,.lmp-links>li{padding-left:0!important;margin-left:0!important}' +
+  '.lmp-grid>li::before,.lmp-links>li::before{content:none!important;display:none!important}' +
   '.lmp-links a{display:inline-block;padding:6px 10px;border:1px solid #ddd;border-radius:6px;text-decoration:none;color:inherit;font-size:14px}' +
   '.lmp-links a:hover{border-color:#999}' +
   '.lmp-brand{margin:0 0 18px}.lmp-brand h2{font-size:18px;margin:0 0 8px}' +
