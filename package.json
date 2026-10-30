@@ -1,0 +1,20 @@
+{
+  "name": "lartek-models-api",
+  "version": "1.0.0",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "import": "node import-csv.js",
+    "test": "node test/donor-code.test.js && node test/donor.test.js && node test/donor-search.test.js && node test/donor-probe.test.js && node test/donor-autodetect.test.js && node test/api-donor.test.js && node test/api-backup.test.js && node test/model-pages.test.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "csv-parse": "^5.5.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "pg": "^8.12.0",
+    "xlsx": "^0.18.5"
+  }
+}

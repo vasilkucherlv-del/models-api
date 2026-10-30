@@ -1,0 +1,490 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Lartek — вкладка «Аналоги»</title>
+<!--
+  ЯК ПРАЦЮЄ (так само, як вкладка «Сумісні моделі»)
+  Аналоги задаються ВРУЧНУ в /admin → «Аналоги (вручну)»: артикул товару і
+  список артикулів-аналогів. Автопідбір вимкнено (AUTO=0).
+
+  1) Скрипт підвантажується автоматично з widget.js — окремий рядок у Horoshop
+     додавати НЕ потрібно.
+  2) Бере артикул з meta[itemprop=sku], питає models-api /api/analogs?sku=…,
+     картки (назва, фото, ціна, наявність) — з /api/cards.
+  3) Куди малює:
+     - товару НЕМАЄ в наявності — одразу під «Повідомити, коли з'явиться»,
+       розгорнутим (і на десктопі, і на мобільному);
+     - інакше у вкладку «Аналоги», ЯКЩО вона є на сторінці. Вкладку створює
+       сам Horoshop, коли в картці товару заповнене поле «Аналог» — впишіть
+       туди будь-який текст. Скрипт вкладок НЕ створює: рідна вкладка
+       малюється разом зі сторінкою, без стрибка розмітки;
+     - якщо вкладки немає — власним блоком під вкладками (мобільний шаблон
+       кастомних вкладок не рендерить узагалі, там завжди блок).
+  4) НІЧОГО не показує і нічого не чіпає, якщо ручних аналогів немає. Вкладку
+     забирає ЛИШЕ в render() — коли справді є що показати, — щоб не стерти
+     текст, вписаний власником у поле «Аналог».
+  5) Явна точка монтування <div class="lartek-analogs-mount"> теж підтримується.
+
+  Роздача: GET /analogs.js (server.js бере вміст тегу скрипта і підставляє
+  var API='' → адресу сервера). Тут звичайний JS, без шаблонних рядків.
+-->
+<script>
+(function(){
+  if (window.__laBooted) return; window.__laBooted = 1;
+  var API='';
+  var SHOW=4;      // скільки карток показувати одразу
+  var FETCH=12;    // скільки кандидатів перевіряти
+  // AUTO=0 — авто-підбір за спільними сумісними моделями ВИМКНЕНО на прохання
+  // власника: надто багато нерелевантних збігів. Показуємо лише РУЧНІ аналоги,
+  // задані в /admin. Повернути автопідбір — поставити 1.
+  var AUTO=0;
+
+  var isRu=/^\/ru(\/|$)/.test(location.pathname);
+  var T=isRu
+    ? {code:'Код: ', ok:'В наличии', off:'Нет в наличии', more:'Показать ещё', empty:'Аналоги для этого товара пока не добавлены.',
+       tglTitle:function(n){return 'Есть '+n+' '+plural(n,'аналог','аналога','аналогов');}, tglFrom:'от ',
+       oosAvail:'✓ Этот товар закончился, но есть замена в наличии',
+       oosAny:'Аналоги этого товара',
+       buy:'Купить', inCart:'В корзине ✓',
+       price:function(p){return p?fmt(p)+' грн':'цена по запросу';}}
+    : {code:'Код: ', ok:'В наявності', off:'Немає в наявності', more:'Показати ще', empty:'Аналоги для цього товару поки не додані.',
+       tglTitle:function(n){return 'Є '+n+' '+plural(n,'аналог','аналоги','аналогів');}, tglFrom:'від ',
+       oosAvail:'✓ Цей товар закінчився, але є заміна в наявності',
+       oosAny:'Аналоги цього товару',
+       buy:'Купити', inCart:'У кошику ✓',
+       price:function(p){return p?fmt(p)+' грн':'ціна за запитом';}};
+  function plural(n,one,few,many){
+    var m10=n%10,m100=n%100;
+    if(m10===1&&m100!==11) return one;
+    if(m10>=2&&m10<=4&&(m100<12||m100>14)) return few;
+    return many;
+  }
+
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function fmt(n){ return Math.round(n).toLocaleString('uk-UA'); }
+  function thumb(url,px){ if(!url) return ''; return 'https://wsrv.nl/?url='+encodeURIComponent(url)+'&w='+px+'&h='+px+'&fit=inside&output=webp'; }
+  function metaSku(){ var m=document.querySelector('meta[itemprop="sku"]'); return m?String(m.getAttribute('content')||'').trim():''; }
+  function norm2(s){ return String(s||'').toLowerCase().replace(/\s+/g,' ').trim(); }
+
+  // ── запобіжники для АВТО-аналогів (ручних не стосуються) ──
+  // Товари підходять до тих самих моделей, але різні за суттю, якщо в назвах
+  // різний обʼєм (чаша 500мл ≠ 350мл) або різний розмір (сальник 25*47*8 ≠ 30*52*10).
+  function volOf(name){
+    var s=String(name||'').toLowerCase().replace(/,/g,'.');
+    var m=s.match(/(\d+(?:\.\d+)?) ?(?:мл|ml)(?![a-zа-яіїє])/);
+    if(m) return parseFloat(m[1]);
+    m=s.match(/(\d+(?:\.\d+)?) ?(?:л|l)(?![a-zа-яіїє0-9])/);
+    if(m) return parseFloat(m[1])*1000;
+    return null;
+  }
+  function dimOf(name){
+    var m=String(name||'').match(/\d+(?:[.,]\d+)?(?:[ ]?[*xх×][ ]?\d+(?:[.,]\d+)?)+(?:[ ]?\/[ ]?\d+(?:[.,]\d+)?)?/i);
+    return m?m[0].toLowerCase().replace(/,/g,'.').replace(/[ ]/g,'').replace(/[xх×]/g,'*'):null;
+  }
+  // Код деталі у назві (напр. підшипник 6202/6203/6204): пралка має ОБИДВА
+  // підшипники, моделі спільні, але 6203 ≠ 6204 — не взаємозамінні. Беремо
+  // окремі 4-значні коди 3000–6999 (потужність 1600W/2000W і роки сюди не
+  // потрапляють). Суфікси (6202-2RS ↔ 6202-2Z) не заважають — код той самий.
+  function codesOf(name){
+    var out={}, s=String(name||''), m,
+        re=/(^|[^0-9a-zа-яёіїєґ])([3-6]\d{3})(?=$|[^0-9])/gi;
+    while((m=re.exec(s))) out[m[2]]=1;
+    return Object.keys(out);
+  }
+  function conflicting(curName,name){
+    var v1=volOf(curName), v2=volOf(name);
+    if(v1!=null&&v2!=null&&Math.abs(v1-v2)>0.5) return true;
+    var d1=dimOf(curName), d2=dimOf(name);
+    if(d1&&d2&&d1!==d2) return true;
+    var c1=codesOf(curName), c2=codesOf(name);
+    if(c1.length&&c2.length&&!c1.some(function(x){return c2.indexOf(x)>=0;})) return true;
+    return false;
+  }
+
+  // ── пошук вкладки «Аналоги» (той самий принцип, що вкладка «Сумісні моделі») ──
+  var TT=['аналоги','аналоги товару','аналоги товара','заміна товару','замена товара','аналоги / заміна товару','аналоги / замена товара','посмотреть замену товара','подивитись заміну товару'];
+  function findTab(){
+    var tabs=document.querySelectorAll('.product-heading__tab, [class*="heading__tab"]');
+    for(var i=0;i<tabs.length;i++){
+      var tt=norm2(tabs[i].textContent);
+      if(TT.indexOf(tt)>=0){
+        var id=(tabs[i].getAttribute('href')||'').replace(/^#/,'');
+        if(id){ var b=document.querySelector('[data-content-id="'+id+'"]')||document.getElementById(id);
+          if(b) return {panel:b, tab:tabs[i]}; }
+      }
+    }
+    var bl=document.querySelectorAll('[data-content-id], .j-product-block__tab, .product__section');
+    for(var j=0;j<bl.length;j++){
+      var tx=norm2(bl[j].textContent).slice(0,60);
+      if(/^аналог|^зам[іе]н|^посмотреть замену|^подивитись заміну/.test(tx)) return {panel:bl[j], tab:null};
+    }
+    return null;
+  }
+  // Ховаємо, запамʼятовуючи попередній inline-display, і повертаємо ЛИШЕ те,
+  // що ховали самі. Вмикати панелі напряму не можна: тема тримає неактивні
+  // панелі вкладок через display:none, і зняте нами "none" показувало вміст
+  // вкладки «Аналоги» просто під «Описом» (панелі в DOM лежать одна під одною).
+  function hideTab(f){
+    hideEl(f.tab); hideEl(f.panel);
+  }
+  function hideEl(el){
+    if(!el || el.getAttribute('data-la-hid')) return;
+    el.setAttribute('data-la-hid','1');
+    el.setAttribute('data-la-prev', el.style.display||'');
+    el.style.display='none';
+  }
+  function unhideEl(el){
+    if(!el || !el.getAttribute('data-la-hid')) return;
+    el.style.display=el.getAttribute('data-la-prev')||'';
+    el.removeAttribute('data-la-hid'); el.removeAttribute('data-la-prev');
+  }
+  // Заголовок вкладки, що відповідає панелі (href="#id" ↔ data-content-id="id").
+  function tabFor(panel){
+    var id=(panel&&panel.getAttribute)?panel.getAttribute('data-content-id'):'';
+    if(!id) return null;
+    var tt=document.querySelectorAll('.product-heading__tab');
+    for(var i=0;i<tt.length;i++) if((tt[i].getAttribute('href')||'')==='#'+id) return tt[i];
+    return null;
+  }
+
+  // Чи товару немає в наявності (працює на обох версіях — розмітка schema.org).
+  function outOfStock(){
+    var a=document.querySelector('[itemprop="availability"]');
+    var h=a?(a.getAttribute('href')||a.getAttribute('content')||''):'';
+    return /OutOfStock|SoldOut|Discontinued/i.test(h);
+  }
+  // Контейнер кнопки «Повідомити, коли з'явиться». Клас j-widget-favorites-add
+  // носить і сердечко «В бажання», тому шукаємо саме за текстом кнопки.
+  function notifyHost(){
+    var all=document.querySelectorAll('.j-widget-favorites-add, button, a'), btn=null;
+    for(var i=0;i<all.length;i++){
+      var e=all[i];
+      if(e.offsetParent===null) continue;
+      if(!/повідом|сообщ/i.test(e.textContent||'')) continue;
+      if(e.querySelector && e.querySelector('button,a')) continue;   // беремо саму кнопку, не обгортку
+      btn=e; break;
+    }
+    if(!btn) return null;
+    // Беремо НАЙВЕРХНІШИЙ контейнер покупки, а не найближчий: на мобільному
+    // найближчий (.product-card__buy-button) лежить у flex-рядку, і блок
+    // ставав його сусідом — виїжджав праворуч за межі екрана.
+    var SEL='.product-order, .product-card__purchase, .product-order__row, .product-card__order, .product-card__buy-button';
+    var h=null, n=btn.parentElement;
+    while(n && n!==document.body){
+      if(n.matches && n.matches(SEL)) h=n;
+      n=n.parentElement;
+    }
+    if(!h) h=btn.parentElement;
+    return (h&&h.parentNode)?h:null;
+  }
+
+  // Мобільний шаблон Horoshop НЕ рендерить кастомні вкладки (немає жодного
+  // .product-heading__tab). Тоді створюємо ВЛАСНИЙ блок «Аналоги» у стилі
+  // мобільної теми — одразу після блоку «Сумісні моделі» (або після опису).
+  // Блок вставляється лише при render(), тож без аналогів нічого не з'являється.
+  function insertOwnBlock(mount,list,openNow){
+    // Товару НЕМАЄ в наявності: одразу РОЗГОРНУТА картка із зеленою шапкою
+    // під «Повідомити, коли з'явиться» — без згортання і зайвих дотиків
+    // («варіант 2», вибір власника).
+    if(openNow){
+      var nh=notifyHost();
+      if(nh){
+        var box=document.createElement('div');
+        box.className='product__block la-block la-near la-oos';
+        var avail=false;
+        for(var a=0;a<list.length;a++){ if(list[a].h&&list[a].h.available){ avail=true; break; } }
+        var bar=document.createElement('div');
+        bar.className='la-oos-hd'+(avail?'':' la-oos-mut');
+        bar.textContent=avail?T.oosAvail:T.oosAny;
+        var bd=document.createElement('div'); bd.className='la-oos-bd';
+        bd.appendChild(mount);
+        box.appendChild(bar); box.appendChild(bd);
+        nh.parentNode.insertBefore(box, nh.nextSibling);
+        return true;
+      }
+      return false; // блок покупки ще не домальований — render() спробує ще раз
+    }
+    var sec=document.createElement('div'); sec.className='product__block la-block';
+    // Заголовок-«кнопка», зрозумілий покупцю: іконка, назва з кількістю, пояснення,
+    // міні-фото товарів усередині і стрілка. За замовчуванням ЗГОРНУТО.
+    var hd=document.createElement('div'); hd.className='la-tgl';
+    // стек фото внахлест (до 3) + «+N»
+    var thumbs='',shown=0;
+    for(var i=0;i<list.length&&shown<3;i++){
+      var p=list[i].h&&list[i].h.picture; if(!p) continue;
+      thumbs+='<img class="la-stk" loading="lazy" src="'+thumb(p,88)+'" data-orig="'+esc(p)+'" alt="">'; shown++;
+    }
+    var extra=list.length-shown;
+    if(extra>0) thumbs+='<span class="la-stk la-stk-more">+'+extra+'</span>';
+    // «від X грн» — мінімальна ціна серед аналогів
+    var minP=0;
+    for(var j=0;j<list.length;j++){ var pr=list[j].h&&list[j].h.price; if(pr&&(!minP||pr<minP)) minP=pr; }
+    hd.innerHTML=(thumbs?('<span class="la-stack">'+thumbs+'</span>'):'')
+      +'<span class="la-tgl-mid"><span class="la-tgl-t">'+T.tglTitle(list.length)+'</span>'
+      +(minP?('<span class="la-tgl-p">'+T.tglFrom+fmt(minP)+' грн</span>'):'')
+      +'</span><span class="la-arr">&#9662;</span>';
+    var inner=document.createElement('div'); inner.style.display='none';
+    inner.appendChild(mount);
+    hd.onclick=function(){
+      var open=inner.style.display!=='none';
+      inner.style.display=open?'none':'';
+      hd.classList.toggle('la-open',!open);
+      var a=hd.querySelector('.la-arr'); if(a) a.innerHTML=open?'&#9662;':'&#9652;';
+    };
+    sec.appendChild(hd); sec.appendChild(inner);
+    // Десктоп без вкладки «Аналоги»: блок одразу ПІД секцією вкладок. Розкладок
+    // може бути кілька (дублі під різну ширину) — беремо видиму (offsetParent).
+    var navs=document.querySelectorAll('.product-heading__nav'), nav=null;
+    for(var n=0;n<navs.length;n++){ if(navs[n].offsetParent!==null){ nav=navs[n]; break; } }
+    if(!nav&&navs.length) nav=navs[0];
+    if(nav&&nav.closest){
+      var g=nav.closest('.product__group--tabs')||nav.closest('.product__group');
+      if(g&&g.parentNode){ g.parentNode.insertBefore(sec,g.nextSibling); return true; }
+    }
+    var cm=document.querySelector('.lartek-compat-mount');
+    var host=cm&&cm.closest&&cm.closest('.product__block');
+    if(host&&host.parentNode){ host.parentNode.insertBefore(sec,host.nextSibling); return true; }
+    var d=document.querySelector('[itemprop="description"], .product-description');
+    var hb=d&&((d.closest&&(d.closest('.product__block')||d.closest('.product-description')))||d);
+    if(hb&&hb.parentNode){ hb.parentNode.insertBefore(sec,hb.nextSibling); return true; }
+    return false;
+  }
+  function connected(el){ return el.isConnected!==undefined?el.isConnected:document.documentElement.contains(el); }
+
+  // ── запуск ──
+  function boot(){
+    var mount=document.querySelector('.lartek-analogs-mount'), found=null;
+    if(mount){
+      // Без цього вкладка встигала блимнути: Horoshop малює її одразу з HTML,
+      // а ми ховали/переносили вміст уже після відповіді API. Якщо у вкладці
+      // лежить ЛИШЕ наша точка монтування (тексту власника немає) — ховаємо
+      // її негайно. Назад покажемо в paint(), якщо справді малюватимемо там.
+      var pnl0=mount.closest?mount.closest('[data-content-id]'):null;
+      if(pnl0 && !norm2(pnl0.textContent)) hideTab({panel:pnl0, tab:tabFor(pnl0)});
+    }
+    if(!mount){
+      found=findTab();
+      if(found){
+        // ВАЖЛИВО: вкладку не чіпаємо тут. Якщо власник наповнив поле «Аналог»
+        // у картці Horoshop вручну, її вміст має лишитись. Забираємо вкладку
+        // лише у render(), тобто коли реально є що показати.
+        mount=document.createElement('div');
+      } else {
+        // Вкладки є, але вкладки «Аналоги» немає (десктоп без ручної вкладки) —
+        // або вкладок немає взагалі (мобільний шаблон). В обох випадках власний
+        // блок вставиться лише при render(), тож без аналогів сторінка чиста.
+        mount=document.createElement('div');
+      }
+    }
+    var sku=metaSku();
+    if(!sku) return;                        // без артикула нічого не робимо і вкладку не ховаємо
+    fetch(API+'/api/analogs?sku='+encodeURIComponent(sku))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var items=(d&&d.items)||[];
+        if(!items.length){ noData(mount,found); return; }
+        var cand=items.slice(0,FETCH);
+        var skus=[sku].concat(cand.map(function(it){ return it.sku; }));
+        return fetch(API+'/api/cards?skus='+encodeURIComponent(skus.join(',')))
+          .then(function(r){ return r.json(); })
+          .then(function(cd){
+            var cards={}; ((cd&&cd.cards)||[]).forEach(function(c){ cards[String(c.sku)]=c; });
+            var cur=cards[String(sku)];
+            var man=[],auto=[];
+            cand.forEach(function(it){
+              var h=cards[String(it.sku)]; if(!h) return;
+              if(cur&&cur.url&&h.url&&h.url===cur.url) return;                      // не сам товар
+              if(it.manual){ man.push({h:h}); return; }                             // ручні — без фільтрів, як задав власник
+              if(!AUTO) return;                                                      // авто-підбір вимкнено (див. AUTO вгорі)
+              if(cur&&cur.category&&h.category&&h.category!==cur.category) return;  // авто — лише та сама категорія
+              if(cur&&conflicting(cur.name,h.name)) return;                          // різний обʼєм/розмір у назві — не аналог
+              auto.push({h:h,shared:it.shared});
+            });
+            if(!man.length&&!auto.length){ noData(mount,found); return; }
+            auto.sort(function(a,b){ return (b.h.available?1:0)-(a.h.available?1:0) || b.shared-a.shared; });
+            // Спершу те, що є в наявності, — його можна купити просто зараз.
+            // Усередині кожної групи порядок зберігаємо (як задано в /admin).
+            var byStock=function(list){
+              var yes=[],no=[];
+              list.forEach(function(x){ (x.h&&x.h.available?yes:no).push(x); });
+              return yes.concat(no);
+            };
+            render(mount,byStock(man).concat(byStock(auto)),found);
+          });
+      })
+      .catch(function(){ noData(mount,found); });
+  }
+  function noData(mount,found){
+    // Вкладку, знайдену за назвою, НЕ чіпаємо: її міг наповнити власник вручну
+    // через поле «Аналог» у картці Horoshop. Ми її не забирали — не ховаємо.
+    if(found) return;
+    if(!connected(mount)) return;                 // мобільний блок ще не вставлено — нічого не робимо
+    // mount вставлено вручну У ВКЛАДКУ — знайдемо її і теж сховаємо, щоб не було пустої
+    var f=findTab();
+    if(f&&f.panel&&f.panel.contains(mount)){ hideTab(f); return; }
+    mount.innerHTML='<div class="la-empty">'+T.empty+'</div>'; css();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot();
+
+  // ── вигляд ──
+  function css(){
+    if(document.getElementById('la-css')) return;
+    var st=document.createElement('style'); st.id='la-css';
+    st.textContent=''
+      +'.la-wrap{font-family:Arial,Helvetica,sans-serif}'
+      +'.la-block{margin:18px 0;font-family:Arial,Helvetica,sans-serif}'
+      +'.la-near{margin:14px 0 4px;width:100%;max-width:100%;flex:1 1 100%;box-sizing:border-box}'
+      +'.la-oos{border:1.5px solid #bfe3cd;border-radius:10px;overflow:hidden;background:#fff}'
+      +'.la-oos-hd{background:#e9f7ef;color:#14663a;font-weight:700;font-size:13.5px;line-height:1.4;padding:9px 14px}'
+      +'.la-oos-hd.la-oos-mut{background:#f2f4f8;color:#5b6675}'
+      +'.la-oos-bd{padding:8px 10px 10px}'
+      +'.la-oos-bd .la-card{border:none;padding:6px 4px}'
+      +'.la-tgl{display:flex;align-items:center;gap:10px;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;'
+      +'border:1px solid #dfe3ea;border-radius:12px;padding:12px 14px;background:#fff;box-shadow:0 1px 3px rgba(15,30,60,.06)}'
+      +'.la-tgl.la-open{border-radius:12px 12px 0 0}'
+      +'.la-stack{display:flex;flex:0 0 auto}'
+      +'.la-stk{width:44px;height:44px;border-radius:50%;border:2px solid #fff;background:#fff;object-fit:contain;box-shadow:0 1px 3px rgba(0,0,0,.15)}'
+      +'.la-stk+.la-stk{margin-left:-14px}'
+      +'.la-stk-more{display:flex;align-items:center;justify-content:center;font-size:11px;color:#5b6b8c;background:#eef1f6}'
+      +'.la-tgl-mid{flex:1;min-width:0;display:block}'
+      +'.la-tgl-t{display:block;font-size:15px;font-weight:bold;color:#111}'
+      +'.la-tgl-p{display:block;font-size:12.5px;color:#1d9d55;margin-top:2px;font-weight:bold}'
+      +'.la-arr{font-size:16px;color:#8a94a6;flex:0 0 auto}'
+      +'.la-tgl+div{border:1px solid #dfe3ea;border-top:none;border-radius:0 0 12px 12px;padding:12px 12px 4px;background:#fbfcfe}'
+      +'.la-card{display:flex;gap:14px;align-items:center;border:1px solid #e6e9ee;border-radius:10px;padding:12px 14px;margin:0 0 10px;background:#fff}'
+      +'.la-img{width:84px;height:84px;flex:0 0 84px;object-fit:contain;border-radius:6px;background:#fafafa}'
+      +'.la-ph{width:84px;height:84px;flex:0 0 84px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:#fafafa;color:#bbb}'
+      +'.la-mid{flex:1;min-width:0}'
+      +'.la-code{font-size:12px;color:#8a94a6;margin:0 0 3px}'
+      +'.la-name{font-size:14px;line-height:1.35;color:#16408f;text-decoration:none;display:block;margin:0 0 5px;font-weight:bold;'
+      +'border:0;border-bottom:0;box-shadow:none;background-image:none}'
+      +'.la-name:hover,.la-name:focus{text-decoration:underline;border:0;border-bottom:0;box-shadow:none;background-image:none}'
+      +'.la-name:hover{text-decoration:underline}'
+      +'.la-av{font-size:12px}.la-av.ok{color:#1d9d55}.la-av.off{color:#d92d20}'
+      +'.la-right{flex:0 0 auto;display:flex;flex-direction:column;align-items:stretch;gap:6px}'
+      +'.la-price{flex:0 0 auto;font-size:15px;font-weight:bold;color:#111;background:#f4f6f9;border-radius:8px;padding:8px 12px;white-space:nowrap;text-align:center}'
+      +'.la-buy{display:block;border:none;border-radius:8px;background:#9e2b33;color:#fff;padding:8px 12px;font-size:13.5px;font-weight:bold;cursor:pointer;white-space:nowrap}'
+      +'.la-buy:hover{background:#872027}'
+      +'.la-buy-done{background:#9e9e9e;cursor:default}'
+      +'.la-buy-done:hover{background:#9e9e9e}'
+      +'.la-off .la-name{color:#5b6b8c}.la-off .la-img{opacity:.55}'
+      +'.la-more{display:block;width:100%;border:1px solid #d5dbe4;background:#fff;border-radius:8px;padding:9px;cursor:pointer;font-size:13px;color:#16408f}'
+      +'.la-empty{font-size:13px;color:#8a94a6;padding:8px 0}'
+      +'@media(max-width:520px){.la-img,.la-ph{width:64px;height:64px;flex-basis:64px}.la-price{font-size:14px;padding:6px 9px}.la-buy{font-size:12.5px;padding:7px 9px}}';
+    document.head.appendChild(st);
+  }
+  function card(h){
+    // Сайт за Cloudflare і сторонньому серверу картинок не віддає, тож
+    // мініатюра з wsrv.nl часто не приходить. Тоді беремо оригінал прямо з
+    // сайту — браузер покупця Cloudflare вже пройшов. Прочерк — третім кроком.
+    var img=h.picture?('<img class="la-img" loading="lazy" src="'+thumb(h.picture,168)+'" alt="" data-orig="'+esc(h.picture)+'">'):'<div class="la-ph">—</div>';
+    var av=h.available?('<span class="la-av ok">'+T.ok+'</span>'):('<span class="la-av off">'+T.off+'</span>');
+    // «Купити» — лише коли товар у наявності і відомий внутрішній id Horoshop
+    // (без нього кошику нічого передати — тоді лишається перехід на сторінку).
+    var buy=(h.available&&h.id)
+      ? '<button type="button" class="la-buy" data-laid="'+esc(h.id)+'" data-url="'+esc(h.url||'')+'">'+T.buy+'</button>' : '';
+    return '<div class="la-card'+(h.available?'':' la-off')+'">'+img
+      +'<div class="la-mid"><div class="la-code">'+T.code+esc(h.sku)+'</div>'
+      +'<a class="la-name" href="'+esc(h.url||'#')+'">'+esc(h.name)+'</a>'+av+'</div>'
+      +'<div class="la-right"><div class="la-price">'+T.price(h.price)+'</div>'+buy+'</div></div>';
+  }
+  // Додати в кошик рідним механізмом теми Horoshop — так само, як її кнопка
+  // «Купити»: AjaxCart.appendProduct({type:'product',...}). Якщо кошика на
+  // сторінці немає — чесний фолбек: перехід на сторінку аналога.
+  function buyClick(btn){
+    try{
+      if(window.AjaxCart&&window.AjaxCart.getInstance){
+        window.AjaxCart.openCartOnAdd=true;
+        window.AjaxCart.getInstance().appendProduct({type:'product',quantity:1,id:String(btn.getAttribute('data-laid'))},[]);
+        btn.textContent=T.inCart; btn.classList.add('la-buy-done'); btn.disabled=true;
+        return;
+      }
+    }catch(e){}
+    var u=btn.getAttribute('data-url'); if(u) location.href=u;
+  }
+  function render(mount,list,found){
+    // Товару НЕМАЄ в наявності — аналоги мають бути там, де покупець вирішує
+    // піти: одразу під «Повідомити, коли з'явиться». Це важливіше за вкладку,
+    // тому пробуємо перед нею — і вкладку тоді взагалі не чіпаємо.
+    // Блок покупки на десктопі домальовується темою пізніше за наш старт,
+    // тому чекаємо на нього кілька спроб, а вже потім відступаємо до вкладки.
+    if(outOfStock()){
+      // Якщо точка монтування вже стоїть у вкладці — переносимо блок звідти,
+      // а вкладку, що спорожніла, ховаємо, щоб не лишалась пуста.
+      var origPanel=(connected(mount)&&mount.closest)?mount.closest('[data-content-id]'):null;
+      var tries=8;
+      var again=function(){
+        if(insertOwnBlock(mount,list,true)){
+          if(found) hideTab(found);
+          else if(origPanel && !norm2(origPanel.textContent)){
+            origPanel.style.display='none';
+            var id=origPanel.getAttribute('data-content-id'), tl=document.querySelectorAll('.product-heading__tab');
+            for(var q=0;q<tl.length;q++) if((tl[q].getAttribute('href')||'')==='#'+id) tl[q].style.display='none';
+          }
+          paint(mount,list); return;
+        }
+        if(--tries>0){ setTimeout(again,500); return; }
+        place(mount,list,found); paint(mount,list);
+      };
+      again(); return;
+    }
+    place(mount,list,found); paint(mount,list);
+  }
+  function place(mount,list,found){
+    // Вкладку Horoshop забираємо ТІЛЬКИ тут — коли є що показати.
+    if(found && found.panel && !connected(mount)){
+      found.panel.innerHTML=''; found.panel.appendChild(mount);
+      unhideEl(found.panel); unhideEl(found.tab);
+    }
+    if(!connected(mount)) insertOwnBlock(mount,list);
+  }
+  // Помилка завантаження картинки не спливає — ловимо на фазі перехоплення.
+  // Слухаємо на document, а не на блоці з картками: кругла іконка в згорнутому
+  // заголовку (la-stk) лежить ПОЗА ним, тож її помилку слухач блоку не бачив —
+  // іконка так і лишалась порожнім кружечком. Чужі картинки не зачіпаємо:
+  // обробник реагує лише на свої класи.
+  function imgFallback(root){
+    // Позначка СВОЯ для кожного віджета (див. те саме в mss2-search):
+    // спільне імʼя на document не давало другому слухачеві підключитись.
+    if(!root || root.__laImgFb) return; root.__laImgFb=1;
+    root.addEventListener('error', function(e){
+      var im=e.target;
+      if(!im || im.tagName!=='IMG' || !/la-img|la-stk/.test(im.className||'')) return;
+      var o=im.getAttribute('data-orig');
+      if(o && !im.getAttribute('data-tried')){ im.setAttribute('data-tried','1'); im.src=o; return; }
+      if(/la-stk/.test(im.className)) { im.style.display='none'; return; }
+      im.outerHTML='<div class="la-ph">—</div>';
+    }, true);
+  }
+  function paint(mount,list){
+    if(!connected(mount)) return;
+    // Вкладку, яку ховали заздалегідь (анти-блимання), повертаємо на місце.
+    // Лише ту, що ховали САМІ: панелі неактивних вкладок тема тримає через
+    // display:none, і чіпати їх не можна.
+    var pnl=mount.closest?mount.closest('[data-content-id]'):null;
+    if(pnl){ unhideEl(pnl); unhideEl(tabFor(pnl)); }
+    css(); imgFallback(document);
+    var html='<div class="la-wrap">';
+    list.slice(0,SHOW).forEach(function(x){ html+=card(x.h); });
+    if(list.length>SHOW) html+='<button type="button" class="la-more">'+T.more+' ('+(list.length-SHOW)+')</button>';
+    html+='</div>';
+    mount.innerHTML=html;
+    // Кнопки «Купити» — делегуванням (картки перемальовуються, слухач один)
+    if(!mount.__laBuy){
+      mount.__laBuy=1;
+      mount.addEventListener('click',function(e){
+        var b=e.target&&e.target.closest?e.target.closest('.la-buy'):null;
+        if(!b||b.disabled) return;
+        e.preventDefault(); e.stopPropagation();
+        buyClick(b);
+      });
+    }
+    var btn=mount.querySelector('.la-more');
+    if(btn) btn.onclick=function(){
+      var rest=''; list.slice(SHOW).forEach(function(x){ rest+=card(x.h); });
+      var tmp=document.createElement('div'); tmp.innerHTML=rest;
+      while(tmp.firstChild) btn.parentNode.insertBefore(tmp.firstChild,btn);
+      btn.remove();
+    };
+  }
+})();
+</script>
