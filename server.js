@@ -12,6 +12,7 @@ const { collectDonorModels, resolveProduct } = require('./donor');
 const { matchDonorProduct } = require('./donor-search');
 const { codesFromName, isCandidate } = require('./donor-code');
 const { probeDonor } = require('./donor-probe');
+const modelPages = require('./model-pages');
 
 const PORT = process.env.PORT || 3000;
 const MIN_CHARS = parseInt(process.env.MIN_CHARS || '3', 10);     // мінімум символів для пошуку
@@ -50,6 +51,9 @@ const limiter = rateLimit({
 });
 
 app.get('/health', (req, res) => res.send('ok'));
+
+// Сторінки «Запчастини для <модель>» (вміст для Cloudflare Worker на lartek.com.ua/modeli/*)
+modelPages.register(app, pool);
 
 // Перевірка ключів. Головний IMPORT_KEY відкриває все; MANAGER_KEY (необов'язкова
 // змінна) — лише додавання моделей до окремого товару (розділи 1 і 1б на /admin),
