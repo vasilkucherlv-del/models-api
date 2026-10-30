@@ -30,6 +30,7 @@ ${offer('0103', 1191, 'true', 180, 'Ремень 2 LG', 'Ремінь 2 LG', 're
 ${offer('0104', 1191, 'true', 190, 'Ремень 3 LG', 'Ремінь 3 LG', 'remen3-lg')}
 </offers></shop></yml_catalog>`;
 
+(async () => {
 const products = parseFeed(xml);
 assert.strictEqual(products.size, 4);
 const p = products.get('0101');
@@ -81,7 +82,9 @@ assert.ok(hub.html.includes('id="lmp-t"') && hub.html.includes('lmp-stats'), 'ф
 const pd = pickerData(idx, 'uk');
 assert.deepStrictEqual(pd.types, [['1185', 'Пральна машина']]);
 assert.deepStrictEqual(pd.brands['1185'], [['lg', 'LG']]);
-assert.deepStrictEqual(pickerData(idx, 'uk', '1185', 'lg'), [['F1020TD5', 'lg-f1020td5'], ['F12B8', 'lg-f12b8']]);
+const { pickerModels } = require('../model-pages');
+const fakePool = { query: async (sql, p) => { assert.strictEqual(p[0], 'LG'); assert.strictEqual(p[1], 'F10%'); return { rows: [{ model: 'F1020TD5', model_norm: 'F1020TD5' }, { model: 'F10B8ND', model_norm: 'F10B8ND' }] }; } };
+assert.deepStrictEqual(await pickerModels(fakePool, idx, 'lg', 'f10'), [['F1020TD5', 'lg-f1020td5'], ['F10B8ND', null]], 'модель без сторінки повертається з null → піде в пошук сайту');
 assert.ok(hub.html.includes('/modeli/lg/'), 'хаб веде на сторінку бренду');
 const lg = brandsOf(idx).get('lg');
 const bp = renderBrand(idx, lg, 'uk');
@@ -105,3 +108,4 @@ assert.ok(uk.breadcrumbs_desktop.includes('breadcrumbs-i') && !uk.breadcrumbs_de
 assert.strictEqual((uk.breadcrumbs_desktop.match(/<svg/g) || []).length, 3, 'стрілки між трьома пунктами');
 
 console.log('model-pages: OK');
+})().catch((e) => { console.error(e); process.exit(1); });
