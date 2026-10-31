@@ -17,7 +17,7 @@ const RU_FEED = process.env.RU_FEED_URL ||
   'https://lartek.com.ua/content/export/4afcdcba6dc44bbcf68db6be51f8d018.xml';
 // Сторінки — для всіх моделей, до яких підходить MIN_PRODUCTS+ товарів (ліміт лише як запобіжник).
 const LIMIT = parseInt(process.env.MODEL_PAGES_LIMIT || '50000', 10);
-const MIN_PRODUCTS = parseInt(process.env.MODEL_PAGES_MIN || '3', 10);
+const MIN_PRODUCTS = parseInt(process.env.MODEL_PAGES_MIN || '2', 10);
 const PER_BRAND = parseInt(process.env.MODEL_PAGES_PER_BRAND || String(LIMIT), 10);
 // Бренд потрапляє в розділ лише з MIN_BRAND+ моделями (відсіює назви моделей у полі «бренд»).
 const MIN_BRAND = parseInt(process.env.MODEL_PAGES_MIN_BRAND || '3', 10);
@@ -192,13 +192,13 @@ function buildIndex(rows, products, limit = LIMIT, min = MIN_PRODUCTS, minBrand 
     // Однаковий набір товарів = однакова сторінка (варіанти моделі на кшталт ...RU/...UA).
     // Лишаємо одну — з найкоротшою назвою, щоб не плодити дублі для Google.
     const key = r.brand.toUpperCase() + '|' + skus.slice().sort().join(',');
-    if (seenSet.has(key)) { const prev = seenSet.get(key); if (r.model.length < prev.model.length) { prev.model = r.model; prev.slug = slug; } continue; }
+    if (seenSet.has(key)) { const prev = seenSet.get(key); prev.variants.push(r.model); prev.aliases.push(slug); seen.add(slug); continue; }
     seen.add(slug);
     // тип техніки — найчастіший серед товарів моделі
     const cnt = {};
     for (const s of skus) { const t = products.get(s).type; if (t) cnt[t] = (cnt[t] || 0) + 1; }
     const type = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0] || null;
-    const item = { slug, brand: r.brand, model: r.model, skus, type: type ? Number(type) : null };
+    const item = { slug, brand: r.brand, model: r.model, variants: [r.model], aliases: [], skus, type: type ? Number(type) : null };
     seenSet.set(key, item);
     list.push(item);
   }
@@ -216,10 +216,15 @@ function buildIndex(rows, products, limit = LIMIT, min = MIN_PRODUCTS, minBrand 
     top.push(m);
     if (top.length >= limit) break;
   }
-  return { list: top, bySlug: new Map(top.map((m) => [m.slug, m])), candidates: list.length };
+  const bySlug = new Map();
+  for (const m of top) { bySlug.set(m.slug, m); for (const a of m.aliases) bySlug.set(a, m); }
+  return { list: top, bySlug, candidates: list.length };
 }
 
-function modelName(m) { return m.brand + ' ' + m.model; }
+// Назва з усіма варіантами коду (WAE20160OE/01, WAE20160OE/05 …) — щоб кожен код був у заголовку; для посилань — коротка.
+function variantsOf(m) { const v = m.variants && m.variants.length ? m.variants : [m.model]; return [...new Set(v)].sort((a, b) => a.length - b.length || a.localeCompare(b)); }
+function modelName(m) { const v = variantsOf(m); return m.brand + ' ' + (v.length > 4 ? v.slice(0, 4).join(', ') + ' +' + (v.length - 4) : v.join(', ')); }
+function modelShort(m) { return m.brand + ' ' + variantsOf(m)[0]; }
 function typeGen(m, lang) { return m.type && TYPES[m.type] ? TYPES[m.type][lang === 'ru' ? 1 : 0] : ''; }
 
 function crumbs(lang, items) {
@@ -302,7 +307,8 @@ function renderModel(idx, products, slug, lang, extra) {
   const t = T[lang];
   const m = idx.bySlug.get(slug) || extra;
   if (!m) return renderNotFound(lang, slug);
-  const thin = !idx.bySlug.has(slug);   // модель поза індексом (1–2 товари): сторінка є, але не для Google
+  const thin = !idx.bySlug.has(slug);   // модель поза індексом (1 товар): сторінка є, але не для Google
+  const canonSlug = (idx.bySlug.get(slug) || {}).slug || slug;
   const name = modelName(m);
   const tg = typeGen(m, lang);
   const full = (tg ? tg + ' ' : '') + name;
@@ -325,10 +331,10 @@ function renderModel(idx, products, slug, lang, extra) {
     `<p class="lmp-intro">${t.intro(esc(name), items.length)}</p>` +
     `<ul class="lmp-grid">${items.map((p) => card(p, lang)).join('')}</ul>` +
     (other.length ? `<h2 class="lmp-h">${esc(t.other(m.brand))}</h2><ul class="lmp-links">` +
-      other.map((o) => `<li><a href="${pathFor(lang, o.slug)}">${esc(modelName(o))}</a></li>`).join('') + '</ul>' : '') +
+      other.map((o) => `<li><a href="${pathFor(lang, o.slug)}">${esc(modelShort(o))}</a></li>`).join('') + '</ul>' : '') +
     `<p><a href="${pathFor(lang, slugPart(m.brand))}">${esc(t.allBrand(m.brand))} →</a></p>`;
 
-  const self = pathFor(lang, slug);
+  const self = pathFor(lang, canonSlug);
   const ld = [
     { '@context': 'https://schema.org', '@type': 'CollectionPage', name: h1, url: SITE + self, inLanguage: lang === 'ru' ? 'ru' : 'uk',
       mainEntity: { '@type': 'ItemList', numberOfItems: items.length,
@@ -339,8 +345,8 @@ function renderModel(idx, products, slug, lang, extra) {
     title: h1 + t.titleTail,
     description: t.desc(full, items.length, minPrice, kinds),
     h1, html, robots: thin ? 'noindex, follow' : 'index, follow',
-    canonical: SITE + self, alternates: alternates(slug),
-    ...crumbsOut(crumbs(lang, [{ name: t.home }, { name: t.hub, url: pathFor(lang) }, { name: m.brand, url: pathFor(lang, slugPart(m.brand)) }, { name: name, self }])),
+    canonical: SITE + self, alternates: alternates(canonSlug),
+    ...crumbsOut(crumbs(lang, [{ name: t.home }, { name: t.hub, url: pathFor(lang) }, { name: m.brand, url: pathFor(lang, slugPart(m.brand)) }, { name: modelShort(m), self }])),
     jsonld: ld,
   };
 }
@@ -356,7 +362,7 @@ function brandsOf(idx) {
 }
 
 // Головна сторінка розділу: лише бренди + популярні моделі (легка; повні списки — на сторінках брендів).
-function renderHub(idx, products, lang) {
+function renderHub(idx, products, lang, totalModels) {
   const t = T[lang];
   const brands = [...brandsOf(idx).values()].sort((a, b) => b.list.length - a.list.length || a.brand.localeCompare(b.brand));
   const nProducts = new Set(idx.list.flatMap((m) => m.skus)).size;
@@ -381,7 +387,7 @@ function renderHub(idx, products, lang) {
     `function go(){var q=M.value.trim();if(!q)return;var f=find();if(f){location.href=P+f[1]+'/';}else{MS.textContent=${JSON.stringify(t.pNo)};}}` +
     `G.onclick=go;M.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();go();}};})();</script>`;
   const html = STYLE + picker +
-    `<ul class="lmp-stats"><li><b>${fmt(idx.list.length)}</b><span>${t.stModels}</span></li><li><b>${brands.length}</b><span>${t.stBrands}</span></li><li><b>${fmt(nProducts)}</b><span>${t.stProducts}</span></li></ul>` +
+    `<ul class="lmp-stats"><li><b>${fmt(totalModels || idx.list.length)}</b><span>${t.stModels}</span></li><li><b>${brands.length}</b><span>${t.stBrands}</span></li><li><b>${fmt(nProducts)}</b><span>${t.stProducts}</span></li></ul>` +
     `<h2 class="lmp-h">${t.brandsH}</h2><ul class="lmp-links">` +
     brands.map((b) => `<li><a href="${pathFor(lang, b.slug)}">${esc(b.brand)} (${b.list.length})</a></li>`).join('') + '</ul>' +
     `<h2 class="lmp-h">${t.plate}</h2><p class="lmp-intro">${t.plateText}</p>`;
@@ -425,7 +431,7 @@ async function pickerModels(pool, idx, brand, q, type) {
   // Без запиту — список моделей бренду цього типу з індексу (щоб покупець бачив варіанти одразу).
   if (!qn) {
     return idx.list.filter((m) => slugPart(m.brand) === brand && (!type || String(m.type) === String(type)))
-      .slice(0, 150).sort((a, b) => a.model.localeCompare(b.model)).map((m) => [m.model, m.slug]);
+      .slice(0, 150).flatMap((m) => variantsOf(m).map((v) => [v, m.slug])).sort((a, b) => a[0].localeCompare(b[0]));
   }
   const r = await pool.query(
     `SELECT model, model_norm FROM compatibility WHERE upper(brand) = $1 AND model_norm LIKE $2
@@ -464,7 +470,7 @@ function renderBrand(idx, b, lang) {
     `<p class="lmp-intro">${esc(t.brandIntro(b.brand, b.list.length))}</p>` +
     order.map(([g, list]) => `<h2 class="lmp-h">${esc(g ? t.parts + ' ' + g + ' ' + b.brand : t.otherType)} (${list.length})</h2><ul class="lmp-links">` +
       list.slice().sort((x, y) => x.model.localeCompare(y.model))
-        .map((m) => `<li><a href="${pathFor(lang, m.slug)}">${esc(m.model)}</a></li>`).join('') + '</ul>').join('') +
+        .map((m) => `<li><a href="${pathFor(lang, m.slug)}">${esc(variantsOf(m).join(' / '))}</a></li>`).join('') + '</ul>').join('') +
     `<p><a href="${pathFor(lang)}">${t.all} →</a></p>`;
   const self = pathFor(lang, b.slug);
   return {
@@ -517,7 +523,7 @@ const MODELS_SQL = `
    ORDER BY count(DISTINCT sku) DESC
    LIMIT $2`;
 
-let state = { at: 0, idx: null, products: null, loading: null };
+let state = { at: 0, idx: null, products: null, loading: null, totalModels: 0 };
 
 async function fetchFeed() {
   const r = await fetch(RU_FEED, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LartekModelPages/1.0)', Accept: 'application/xml,text/xml,*/*' } });
@@ -530,10 +536,11 @@ async function load(pool) {
   if (state.loading) return state.idx ? state : state.loading;
   state.loading = (async () => {
     try {
-      const [xml, db] = await Promise.all([fetchFeed(), pool.query(MODELS_SQL, [MIN_PRODUCTS, LIMIT * 4])]);
+      const [xml, db, tot] = await Promise.all([fetchFeed(), pool.query(MODELS_SQL, [MIN_PRODUCTS, LIMIT * 4]),
+        pool.query(`SELECT count(*)::int AS n FROM (SELECT 1 FROM compatibility WHERE brand <> '' GROUP BY upper(brand), model_norm) x`)]);
       const products = parseFeed(xml);
       const idx = buildIndex(db.rows, products);
-      state = { at: Date.now(), idx, products, loading: null };
+      state = { at: Date.now(), idx, products, loading: null, totalModels: tot.rows[0].n };
     } catch (e) {
       console.error('model-pages load:', e.message);
       state.loading = null;
@@ -552,7 +559,7 @@ function register(app, pool) {
       const slug = String(req.query.slug || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
       const br = slug && brandsOf(s.idx).get(slug);
       const extra = slug && !br && !s.idx.bySlug.has(slug) ? await dynamicModel(pool, s.idx, s.products, slug) : null;
-      const out = !slug ? renderHub(s.idx, s.products, lang(req)) : br ? renderBrand(s.idx, br, lang(req)) : renderModel(s.idx, s.products, slug, lang(req), extra);
+      const out = !slug ? renderHub(s.idx, s.products, lang(req), s.totalModels) : br ? renderBrand(s.idx, br, lang(req)) : renderModel(s.idx, s.products, slug, lang(req), extra);
       res.set('Cache-Control', 'public, max-age=1800');
       res.json(out);
     } catch (e) {
@@ -587,7 +594,7 @@ function register(app, pool) {
       const s = await load(pool);
       const brands = {};
       for (const m of s.idx.list) brands[m.brand] = (brands[m.brand] || 0) + 1;
-      res.json({ pages: s.idx.list.length, candidates: s.idx.candidates, minProducts: MIN_PRODUCTS, perBrand: PER_BRAND,
+      res.json({ pages: s.idx.list.length, totalModels: s.totalModels, candidates: s.idx.candidates, minProducts: MIN_PRODUCTS, perBrand: PER_BRAND,
         brands, products: s.products.size, builtAt: new Date(s.at).toISOString(),
         top: s.idx.list.slice(0, 20).map((m) => ({ slug: m.slug, n: m.skus.length, type: typeGen(m, 'uk') })) });
     } catch (e) {
@@ -596,4 +603,4 @@ function register(app, pool) {
   });
 }
 
-module.exports = { register, parseFeed, buildIndex, renderModel, renderHub, renderBrand, brandsOf, pickerData, pickerModels, dynamicModel, renderSitemap, makeSlug, plural };
+module.exports = { register, parseFeed, buildIndex, renderModel, renderHub, renderBrand, brandsOf, modelName, variantsOf, pickerData, pickerModels, dynamicModel, renderSitemap, makeSlug, plural };
