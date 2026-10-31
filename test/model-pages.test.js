@@ -72,6 +72,7 @@ assert.ok(!uk.html.includes('/ru/amort-lg/'), 'українська сторін
 assert.ok(uk.html.indexOf('remen-lg') > uk.html.indexOf('remen2-lg'), 'спершу товари в наявності');
 assert.strictEqual(uk.canonical, 'https://lartek.com.ua/modeli/lg-f1020td5/');
 assert.ok(uk.html.includes('/modeli/lg-f12b8/'), 'посилання на інші моделі бренду');
+assert.ok(uk.html.includes('F1020TD5.ALSPBWT') && uk.html.includes('2 модифікацій'), 'усі варіанти коду в тексті сторінки');
 
 const ru = renderModel(idx, products, 'lg-f1020td5', 'ru');
 assert.strictEqual(ru.h1, 'Запчасти для стиральной машины LG F1020TD5, F1020TD5.ALSPBWT');
