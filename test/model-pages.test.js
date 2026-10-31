@@ -60,7 +60,11 @@ assert.strictEqual(makeSlug('De Longhi', 'EC685'), 'de-longhi-ec685');
 
 const uk = renderModel(idx, products, 'lg-f1020td5', 'uk');
 assert.strictEqual(uk.status, 200);
-assert.strictEqual(uk.h1, 'Запчастини для пральної машини LG F1020TD5');
+assert.strictEqual(uk.h1, 'Запчастини для пральної машини LG F1020TD5, F1020TD5.ALSPBWT', 'усі варіанти коду в заголовку');
+assert.ok(idx.bySlug.get('lg-f1020td5alspbwt') === idx.bySlug.get('lg-f1020td5'), 'варіант відкриває ту саму сторінку');
+const alias = renderModel(idx, products, 'lg-f1020td5alspbwt', 'uk');
+assert.strictEqual(alias.canonical, 'https://lartek.com.ua/modeli/lg-f1020td5/', 'canonical варіанта — головна сторінка');
+assert.strictEqual(alias.robots, 'index, follow');
 assert.ok(uk.title.startsWith('Запчастини для пральної машини LG F1020TD5'));
 assert.ok(uk.description.includes('ціни від 180 грн'));
 assert.ok(uk.html.includes('https://lartek.com.ua/amort-lg/'));
@@ -70,7 +74,7 @@ assert.strictEqual(uk.canonical, 'https://lartek.com.ua/modeli/lg-f1020td5/');
 assert.ok(uk.html.includes('/modeli/lg-f12b8/'), 'посилання на інші моделі бренду');
 
 const ru = renderModel(idx, products, 'lg-f1020td5', 'ru');
-assert.strictEqual(ru.h1, 'Запчасти для стиральной машины LG F1020TD5');
+assert.strictEqual(ru.h1, 'Запчасти для стиральной машины LG F1020TD5, F1020TD5.ALSPBWT');
 assert.strictEqual(ru.canonical, 'https://lartek.com.ua/ru/modeli/lg-f1020td5/');
 assert.ok(ru.html.includes('/ru/amort-lg/'));
 
@@ -79,7 +83,8 @@ assert.strictEqual(nf.status, 404);
 assert.strictEqual(nf.robots, 'noindex, follow');
 
 const { renderBrand, brandsOf } = require('../model-pages');
-const hub = renderHub(idx, products, 'uk');
+const hub = renderHub(idx, products, 'uk', 123456);
+assert.ok(hub.html.includes('123'), 'на хабі — загальна кількість моделей у базі');
 const { pickerData } = require('../model-pages');
 assert.ok(hub.html.includes('id="lmp-t"') && hub.html.includes('lmp-stats'), 'форма підбору і цифри');
 const pd = pickerData(idx, 'uk');
@@ -88,7 +93,7 @@ assert.deepStrictEqual(pd.brands['1185'], [['lg', 'LG']]);
 const { pickerModels } = require('../model-pages');
 const fakePool = { query: async (sql, p) => { assert.strictEqual(p[0], 'LG'); assert.strictEqual(p[1], 'F10%'); return { rows: [{ model: 'F1020TD5', model_norm: 'F1020TD5' }, { model: 'F10B8ND', model_norm: 'F10B8ND' }] }; } };
 assert.deepStrictEqual(await pickerModels(fakePool, idx, 'lg', 'f10'), [['F1020TD5', 'lg-f1020td5'], ['F10B8ND', 'lg-f10b8nd']], 'кожна модель має адресу сторінки');
-assert.deepStrictEqual(await pickerModels(fakePool, idx, 'lg', '', '1185'), [['F1020TD5', 'lg-f1020td5'], ['F12B8', 'lg-f12b8'], ['F14B8', 'lg-f14b8']], 'без запиту — список моделей бренду з індексу');
+assert.deepStrictEqual(await pickerModels(fakePool, idx, 'lg', '', '1185'), [['F1020TD5', 'lg-f1020td5'], ['F1020TD5.ALSPBWT', 'lg-f1020td5'], ['F12B8', 'lg-f12b8'], ['F14B8', 'lg-f14b8']], 'без запиту — список моделей бренду з індексу, варіанти окремо');
 const { dynamicModel } = require('../model-pages');
 const pool2 = { query: async (sql, p) => { assert.deepStrictEqual(p, ['LG', 'F10B8ND']); return { rows: [{ model: 'F10B8ND', skus: ['0101', '9999'] }] }; } };
 const dyn = await dynamicModel(pool2, idx, products, 'lg-f10b8nd');
