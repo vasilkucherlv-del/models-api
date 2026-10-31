@@ -77,7 +77,7 @@ const T = {
       'Сумісність перевірена за каталожними номерами виробника. Перед замовленням звірте модель на шильдику техніки — ' +
       'якщо сумніваєтесь, напишіть нам номер моделі, і менеджер підтвердить, що деталь підійде.',
     other: (b) => 'Інші моделі ' + b,
-    all: 'Усі моделі техніки',
+    all: 'Усі моделі техніки', variantsH: (n) => 'Ці ж запчастини підходять до ' + n + ' ' + plural(n, 'модифікації', 'модифікацій', 'модифікацій'),
     allBrand: (b) => 'Усі моделі ' + b,
     brandsH: 'Бренди', pick: 'Підібрати за моделлю', pType: 'Тип техніки', pBrand: 'Бренд', pModel: 'Модель', pBtn: 'Показати запчастини', pAny: 'Оберіть…', pNo: 'Такої моделі не знайдено. Перевірте номер на шильдику або напишіть менеджеру — підберемо вручну.',
     stModels: 'моделей техніки', stBrands: 'брендів', stProducts: 'товарів із перевіреною сумісністю',
@@ -102,7 +102,7 @@ const T = {
       'Совместимость проверена по каталожным номерам производителя. Перед заказом сверьте модель на шильдике техники — ' +
       'если сомневаетесь, напишите нам номер модели, и менеджер подтвердит, что деталь подойдёт.',
     other: (b) => 'Другие модели ' + b,
-    all: 'Все модели техники',
+    all: 'Все модели техники', variantsH: (n) => 'Эти же запчасти подходят к ' + n + ' ' + plural(n, 'модификации', 'модификациям', 'модификациям'),
     allBrand: (b) => 'Все модели ' + b,
     brandsH: 'Бренды', pick: 'Подобрать по модели', pType: 'Тип техники', pBrand: 'Бренд', pModel: 'Модель', pBtn: 'Показать запчасти', pAny: 'Выберите…', pNo: 'Такая модель не найдена. Проверьте номер на шильдике или напишите менеджеру — подберём вручную.',
     stModels: 'моделей техники', stBrands: 'брендов', stProducts: 'товаров с проверенной совместимостью',
@@ -328,8 +328,10 @@ function renderModel(idx, products, slug, lang, extra) {
 
   const h1 = t.parts + ' ' + full;
   const html = STYLE +
-    `<p class="lmp-intro">${t.intro(esc(name), items.length)}</p>` +
+    `<p class="lmp-intro">${t.intro(esc(modelShort(m)), items.length)}</p>` +
     `<ul class="lmp-grid">${items.map((p) => card(p, lang)).join('')}</ul>` +
+    // усі коди-варіанти цієї моделі (той самий набір деталей) — щоб кожен був у тексті сторінки
+    (variantsOf(m).length > 1 ? `<h2 class="lmp-h">${esc(t.variantsH(variantsOf(m).length))}</h2><p class="lmp-intro">${esc(m.brand)} ${variantsOf(m).map(esc).join(', ')}</p>` : '') +
     (other.length ? `<h2 class="lmp-h">${esc(t.other(m.brand))}</h2><ul class="lmp-links">` +
       other.map((o) => `<li><a href="${pathFor(lang, o.slug)}">${esc(modelShort(o))}</a></li>`).join('') + '</ul>' : '') +
     `<p><a href="${pathFor(lang, slugPart(m.brand))}">${esc(t.allBrand(m.brand))} →</a></p>`;
@@ -540,6 +542,7 @@ async function load(pool) {
         pool.query(`SELECT count(*)::int AS n FROM (SELECT 1 FROM compatibility WHERE brand <> '' GROUP BY upper(brand), model_norm) x`)]);
       const products = parseFeed(xml);
       const idx = buildIndex(db.rows, products);
+      idx.rowsFetched = db.rows.length;
       state = { at: Date.now(), idx, products, loading: null, totalModels: tot.rows[0].n };
     } catch (e) {
       console.error('model-pages load:', e.message);
@@ -594,7 +597,7 @@ function register(app, pool) {
       const s = await load(pool);
       const brands = {};
       for (const m of s.idx.list) brands[m.brand] = (brands[m.brand] || 0) + 1;
-      res.json({ pages: s.idx.list.length, totalModels: s.totalModels, candidates: s.idx.candidates, minProducts: MIN_PRODUCTS, perBrand: PER_BRAND,
+      res.json({ pages: s.idx.list.length, totalModels: s.totalModels, candidates: s.idx.candidates, rowsFetched: s.idx.rowsFetched, minProducts: MIN_PRODUCTS, perBrand: PER_BRAND,
         brands, products: s.products.size, builtAt: new Date(s.at).toISOString(),
         top: s.idx.list.slice(0, 20).map((m) => ({ slug: m.slug, n: m.skus.length, type: typeGen(m, 'uk') })) });
     } catch (e) {
